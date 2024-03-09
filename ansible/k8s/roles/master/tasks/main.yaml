@@ -1,0 +1,46 @@
+---
+- name: Clean Config
+  command: kubeadm reset -f
+
+- name: Initialize Kubernetes Cluster
+  command: kubeadm init --apiserver-advertise-address={{ master_ip }} --apiserver-cert-extra-sans={{ master_ip }} --node-name master --pod-network-cidr={{ cidr }}
+
+- name: Create User Config DIR
+  file:
+    path: "/home/{{ user }}/.kube"
+    state: directory
+    mode: 0755
+
+- name: Copy Config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ user }}/.kube/config"
+    owner: "{{ user }}"
+    group: "{{ user }}"
+    remote_src: yes
+
+- name: Install Calico
+  become: false
+  command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+
+- name: Create Token for Join Cluster
+  shell: kubeadm token create --print-join-command
+  register: join
+
+- name: Copy file for Join
+  copy:
+    content: "{{ join.stdout }}"
+    dest: /root/join.sh
+
+- name: Get file Join
+  fetch:
+    dest: ./join
+    src: /root/join.sh
+
+- name: Organizer file for Workers
+  become: false
+  shell: |
+    cp join/{{ inventory_hostname }}/root/join.sh join/
+    rm -rf join/{{ inventory_hostname }}
+  delegate_to: localhost
+  
