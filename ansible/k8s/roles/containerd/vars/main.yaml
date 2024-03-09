@@ -1,0 +1,16 @@
+---
+packages:
+  - apt-transport-https
+  - gnupg-agent
+  - curl
+  - gpg
+
+cri: 
+  - containerd.io
+
+fstab:
+  - swap
+
+modprobe:
+  - overlay
+  - br_netfilter

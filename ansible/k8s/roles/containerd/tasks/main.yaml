@@ -1,0 +1,62 @@
+---
+- name: Install Containerd Prereqs
+  apt:
+    name: "{{ item }}"
+    update_cache: yes
+  loop: "{{ packages }}"
+
+- name: Modules for Kernel Linux
+  ansible.builtin.copy:
+    src: ./files/cri.conf
+    dest: /etc/modules-load.d/k8s.conf
+    mode: 755
+
+- name: Add Modprobe
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ modprobe }}"
+
+- name: Add GPG KEY
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker Repository
+  apt_repository:
+    repo: deb https://download.docker.com/linux/ubuntu jammy stable
+    state: present
+
+- name: Install ContainerD
+  apt:
+    name: "{{ item }}"
+    update_cache: yes
+  loop: "{{ cri }}"
+
+- name: Create dir ContainerD
+  file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Create file config ContainerD
+  shell: containerd config default > /etc/containerd/config.toml
+
+- name: Config file ContainerD
+  command: sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+
+- name: Restart Containerd Service
+  become: true
+  service:
+    name: containerd
+    state: restarted
+    enabled: yes
+
+- name: Remove swapfile from /etc/fstab
+  mount:
+    name: "{{ item }}"
+    fstype: swap
+    state: absent
+  loop: "{{ fstab }}"
