@@ -1,0 +1,32 @@
+---
+- name: add Kubernetes apt-key
+  get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: '0644'
+    force: true
+
+- name: add Kubernetes' APT repository
+  apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+    state: present
+    update_cache: yes
+
+- name: Install Packages
+  apt:
+    name: "{{ item }}"
+  loop: "{{ Kubernetes }}"
+
+- name: Restart Kubelet
+  service:
+    name: kubelet
+    daemon_reload: yes
+    state: restarted
+
+- name: Ensure they can see Bridge Traffic
+  sysctl:
+    name: "{{ item }}"
+    value: '1'
+    state: present
+  loop: "{{ sysctl }}"
+  become: true
