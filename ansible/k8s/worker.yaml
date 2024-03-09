@@ -1,0 +1,10 @@
+---
+- name: "worker"
+  hosts: all
+  tags: worker
+  become: true
+
+  roles:
+    - containerd
+    - kubernetes
+    - worker
