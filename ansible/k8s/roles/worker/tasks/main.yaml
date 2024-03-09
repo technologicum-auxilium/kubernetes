@@ -1,0 +1,9 @@
+---
+- name: Copy Join to Workers
+  copy:
+    src: ./join/join.sh
+    dest: /opt/join.sh
+    mode: '0700'
+
+- name: Joining the Cluster
+  shell: /opt/join.sh
