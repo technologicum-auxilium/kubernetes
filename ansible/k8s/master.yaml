@@ -1,0 +1,10 @@
+---
+- name: master
+  hosts: all
+  become: true
+  tags: master
+
+  roles:
+    - containerd
+    - kubernetes
+    - master
