@@ -1,0 +1,18 @@
+# metallb-config.yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: hostonly-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.100.100-192.168.100.120
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: hostonly-adv
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - hostonly-pool

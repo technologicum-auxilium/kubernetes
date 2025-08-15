@@ -1,46 +1,80 @@
 ---
-- name: Clean Config
-  command: kubeadm reset -f
+# roles/master/tasks/main.yml
 
-- name: Initialize Kubernetes Cluster
-  command: kubeadm init --apiserver-advertise-address={{ master_ip }} --apiserver-cert-extra-sans={{ master_ip }} --node-name master --pod-network-cidr={{ cidr }}
+- name: Ensure kubelet uses bridged IP
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/default/kubelet
+    create: true
+    regexp: '^KUBELET_EXTRA_ARGS='
+    line: 'KUBELET_EXTRA_ARGS="--node-ip={{ node_ip }}"'
+    mode: '0644'
 
-- name: Create User Config DIR
-  file:
-    path: "/home/{{ user }}/.kube"
-    state: directory
-    mode: 0755
+- name: Reload systemd and restart kubelet
+  become: true
+  ansible.builtin.shell: |
+    systemctl daemon-reload
+    systemctl restart kubelet
+  changed_when: false
 
-- name: Copy Config
-  copy:
-    src: /etc/kubernetes/admin.conf
-    dest: "/home/{{ user }}/.kube/config"
-    owner: "{{ user }}"
-    group: "{{ user }}"
-    remote_src: yes
+- name: Check if cluster already exists
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: admin_conf
 
-- name: Install Calico
-  become: false
-  command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+- block:
+    - name: kubeadm reset (first build only)
+      become: true
+      ansible.builtin.command: kubeadm reset -f
 
-- name: Create Token for Join Cluster
-  shell: kubeadm token create --print-join-command
-  register: join
+    - name: Initialize Kubernetes Cluster
+      become: true
+      ansible.builtin.command: >
+        kubeadm init
+        --apiserver-advertise-address={{ master_ip }}
+        --apiserver-cert-extra-sans={{ master_ip }}
+        --node-name master
+        --pod-network-cidr={{ cidr }}
 
-- name: Copy file for Join
-  copy:
-    content: "{{ join.stdout }}"
-    dest: /root/join.sh
+    - name: Create kube dir for user
+      become: true
+      ansible.builtin.file:
+        path: "/home/{{ user }}/.kube"
+        state: directory
+        owner: "{{ user }}"
+        group: "{{ user }}"
+        mode: '0755'
 
-- name: Get file Join
-  fetch:
-    dest: ./join
-    src: /root/join.sh
+    - name: Copy kubeconfig to user
+      become: true
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ user }}/.kube/config"
+        owner: "{{ user }}"
+        group: "{{ user }}"
+        mode: '0600'
+        remote_src: true
 
-- name: Organizer file for Workers
-  become: false
-  shell: |
-    cp join/{{ inventory_hostname }}/root/join.sh join/
-    rm -rf join/{{ inventory_hostname }}
-  delegate_to: localhost
-  
+    - name: Install Calico (idempotent)
+      become: false
+      environment:
+        KUBECONFIG: "/home/{{ user }}/.kube/config"
+      ansible.builtin.command: >
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+
+    - name: Ensure master has control-plane taint (NoSchedule)
+      become: false
+      environment:
+        KUBECONFIG: "/home/{{ user }}/.kube/config"
+      ansible.builtin.command: >
+        kubectl taint nodes master node-role.kubernetes.io/control-plane=:NoSchedule --overwrite
+
+    - name: Create join command
+      become: true
+      ansible.builtin.shell: kubeadm token create --print-join-command
+      register: join_cmd
+
+    - name: Expose join command for workers
+      ansible.builtin.set_fact:
+        kube_join_command: "{{ join_cmd.stdout }}"
+  when: not admin_conf.stat.exists
