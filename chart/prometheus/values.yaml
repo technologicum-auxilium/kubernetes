@@ -1,0 +1,51 @@
+grafana:
+  adminPassword: techaux123
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    hosts:
+      - grafana.techaux.com.br
+    path: /
+    pathType: Prefix
+
+prometheus:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    hosts:
+      - prometheus.techaux.com.br
+    paths:
+      - /
+    pathType: Prefix
+
+  prometheusSpec:
+    externalUrl: "http://prometheus.techaux.com.br"
+    routePrefix: "/"
+
+# --- ALERTMANAGER ---
+alertmanager:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations: {}
+    hosts:
+      - alertmanager.techaux.com.br
+    paths:
+      - /
+    pathType: Prefix
+  alertmanagerSpec:
+    externalUrl: "https://alertmanager.techaux.com.br"
+    routePrefix: "/"

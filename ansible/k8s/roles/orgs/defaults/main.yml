@@ -1,0 +1,93 @@
+# ==== Your existing vars (shim expects these) ====
+ad_domain_name: "techaux.local"
+ad_root_ou: "CORP"
+
+ad_redirect_users: true
+ad_create_baseline_gpos: true
+
+ad_departments:
+  - IT
+  - Finance
+  - HR
+  - Sales
+  - Marketing
+  - Legal
+  - Operations
+  - Support
+  - Security
+  - Engineering
+  - Product
+  - Procurement
+  - Logistics
+
+# Country -> State -> (Top-5) Cities
+ad_geo_cities:
+  BR:
+    SP: ["SaoPaulo","Campinas","SaoBernardoDoCampo","SantoAndre","Osasco"]
+    RJ: ["RioDeJaneiro","Niteroi","DuqueDeCaxias","CamposDosGoytacazes","NovaIguacu"]
+    MG: ["BeloHorizonte","Uberlandia","Contagem","JuizDeFora","Betim"]
+    RS: ["PortoAlegre","CaxiasDoSul","Canoas","Pelotas","SantaMaria"]
+    PR: ["Curitiba","Londrina","Maringa","PontaGrossa","Cascavel"]
+  US:
+    CA: ["LosAngeles","SanFrancisco","SanDiego","SanJose","Sacramento"]
+    TX: ["Houston","Dallas","Austin","SanAntonio","FortWorth"]
+    NY: ["NewYorkCity","Buffalo","Rochester","Yonkers","Syracuse"]
+    FL: ["Miami","Orlando","Tampa","Jacksonville","Tallahassee"]
+    IL: ["Chicago","Aurora","Naperville","Rockford","Springfield"]
+
+# Placement policies
+ad_workstations_quarantine_level: "workstations_root"   # or: country | state
+ad_servers_baseline_level: "servers_root"               # or: country | state
+
+# ==== People / org =====
+default_password: "ChangeMe!2025"
+force_password_change_at_logon: true
+password_never_expires: false
+enabled_by_default: true
+
+group_prefix_dept: "GG_DEPT_"
+group_prefix_role: "GG_ROLE_"
+
+# Minimal example org; extend as needed
+ad_org:
+  - department: "Executive"
+    dept_groups: ["Executives"]
+    role_groups: []
+    users:
+      - username: "ceo"
+        given_name: "John"
+        surname: "Doe"
+        display_name: "John Doe"
+        title: "Chief Executive Officer"
+        mail: "ceo@techaux.local"
+        upn: "ceo@techaux.local"
+        manager: null
+        member_of_roles: ["Executives"]
+  - department: "IT"
+    dept_groups: ["IT"]
+    role_groups: ["IT-Admins","Developers","Support"]
+    users:
+      - username: "cto"
+        given_name: "Alice"
+        surname: "Ng"
+        display_name: "Alice Ng"
+        title: "Chief Technology Officer"
+        mail: "cto@techaux.local"
+        upn: "cto@techaux.local"
+        manager: "ceo"
+        member_of_roles: ["IT"]
+
+# ==== Shim → internal vars expected by tasks ====
+root_ou_name: "{{ ad_root_ou }}"
+domain_dn: "{{ 'DC=' + (ad_domain_name | split('.') | join(',DC=')) }}"
+departments: "{{ ad_departments }}"
+geo_cities: "{{ ad_geo_cities }}"
+workstations_quarantine_level: "{{ ad_workstations_quarantine_level }}"
+servers_baseline_level: "{{ ad_servers_baseline_level }}"
+redirect_users: "{{ ad_redirect_users | default(true) }}"
+create_baseline_gpos: "{{ ad_create_baseline_gpos | default(true) }}"
+org: "{{ ad_org }}"
+
+# Enable parts
+enable_ou: true
+enable_people: true

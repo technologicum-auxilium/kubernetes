@@ -8,3 +8,4 @@
     - containerd
     - kubernetes
     - master
+    - os

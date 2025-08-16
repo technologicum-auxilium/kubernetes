@@ -1,0 +1,60 @@
+controller:
+  image:
+    registry: docker.io
+    repository: jenkins/jenkins
+    tag: lts
+    pullPolicy: IfNotPresent
+
+  admin:
+    username: admin
+    password: "techaux123"   # (recomendado trocar ou usar existingSecret)
+
+  serviceType: ClusterIP
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hostName: jenkins.techaux.com.br
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+
+  jenkinsUriPrefix: "/"
+  jenkinsUrl: "http://jenkins.techaux.com.br"
+
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+  JCasC:
+    defaultConfig: false
+    configScripts: {}
+
+persistence:
+  enabled: true
+  storageClass: longhorn
+  accessMode: ReadWriteOnce
+  size: 20Gi
+
+agent:
+  enabled: true
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+  image: "jenkins/inbound-agent:latest"
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

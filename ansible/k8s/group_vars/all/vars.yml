@@ -1,0 +1,109 @@
+# (seus) conexão/WinRM
+ansible_connection: winrm
+ansible_port: 5985
+ansible_winrm_transport: ntlm
+ansible_winrm_server_cert_validation: ignore
+ansible_shell_type: powershell
+
+# (seus) domínios
+domains:
+  - id: techaux
+    name: techaux.local
+    ou: OU=sales,DC=techaux,DC=local   # <- manterei como está; a role usa sua própria raiz
+    user: Administrator
+
+# (seus) parâmetros de AD/cluster
+ad_cluster:
+  domain_name: "techaux.local"
+  domain_netbios: "TECHAUX"
+  safe_mode_password: "Techaux2016"
+  forest_mode: "WinThreshold"
+  domain_mode: "WinThreshold"
+  site_name: "Default-First-Site-Name"
+  dns_delegation: false
+  reboot_after_install: true
+  install_management_tools: true
+
+
+# =======================
+# ADD: Shim para a role techaux_ad
+# =======================
+
+# A raiz de OUs que a role vai criar (mude se quiser outro nome)
+ad_root_ou: "CORP"
+
+# Deriva DN do domínio a partir do ad_cluster.domain_name
+ad_domain_name: "{{ ad_cluster.domain_name }}"
+domain_dn: "{{ 'DC=' + (ad_domain_name | split('.') | join(',DC=')) }}"
+
+# Redirecionamentos e GPOs
+ad_redirect_users: true
+ad_create_baseline_gpos: true
+
+# Departamentos (pode adaptar)
+ad_departments:
+  - IT
+  - Finance
+  - HR
+  - Sales
+  - Marketing
+  - Legal
+  - Operations
+  - Support
+  - Security
+  - Engineering
+  - Product
+  - Procurement
+  - Logistics
+
+# País -> Estado -> Top-5 cidades (pode adaptar)
+ad_geo_cities:
+  BR:
+    SP: ["SaoPaulo","Campinas","SaoBernardoDoCampo","SantoAndre","Osasco"]
+    RJ: ["RioDeJaneiro","Niteroi","DuqueDeCaxias","CamposDosGoytacazes","NovaIguacu"]
+    MG: ["BeloHorizonte","Uberlandia","Contagem","JuizDeFora","Betim"]
+    RS: ["PortoAlegre","CaxiasDoSul","Canoas","Pelotas","SantaMaria"]
+    PR: ["Curitiba","Londrina","Maringa","PontaGrossa","Cascavel"]
+  US:
+    CA: ["LosAngeles","SanFrancisco","SanDiego","SanJose","Sacramento"]
+    TX: ["Houston","Dallas","Austin","SanAntonio","FortWorth"]
+    NY: ["NewYorkCity","Buffalo","Rochester","Yonkers","Syracuse"]
+    FL: ["Miami","Orlando","Tampa","Jacksonville","Tallahassee"]
+    IL: ["Chicago","Aurora","Naperville","Rockford","Springfield"]
+
+# Nível dos “buckets” de Workstations e Servers
+ad_workstations_quarantine_level: "workstations_root"   # (country|state se preferir)
+ad_servers_baseline_level: "servers_root"               # (country|state se preferir)
+
+# Pessoas (exemplo mínimo, expanda conforme sua hierarquia)
+ad_org:
+  - department: "Executive"
+    dept_groups: ["Executives"]
+    role_groups: []
+    users:
+      - username: "ceo"
+        given_name: "John"
+        surname: "Doe"
+        display_name: "John Doe"
+        title: "Chief Executive Officer"
+        mail: "ceo@techaux.local"
+        upn: "ceo@techaux.local"
+        manager: null
+        member_of_roles: ["Executives"]
+  - department: "IT"
+    dept_groups: ["IT"]
+    role_groups: ["IT-Admins","Developers","Support"]
+    users:
+      - username: "cto"
+        given_name: "Alice"
+        surname: "Ng"
+        display_name: "Alice Ng"
+        title: "Chief Technology Officer"
+        mail: "cto@techaux.local"
+        upn: "cto@techaux.local"
+        manager: "ceo"
+        member_of_roles: ["IT"]
+
+# Flags para habilitar partes da role unificada
+enable_ou: true
+enable_people: true

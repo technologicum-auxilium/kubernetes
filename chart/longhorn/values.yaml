@@ -1,0 +1,75 @@
+# Longhorn Helm chart values
+# Use com:
+# helm upgrade --install longhorn longhorn/longhorn \
+#   -n longhorn-system --create-namespace -f longhorn-values.yaml
+
+# ========= UI via Ingress (NGINX) =========
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  host: longhorn.techaux.com.br
+  path: /
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    # Exemplo (opcional) de basic-auth na borda:
+    # nginx.ingress.kubernetes.io/auth-type: basic
+    # nginx.ingress.kubernetes.io/auth-secret: longhorn-basic-auth
+    # nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+
+# ========= Ajustes padrões do Longhorn =========
+defaultSettings:
+  # 3 nós no seu lab → 3 réplicas por volume funciona. Se reduzir nós, mude para 2 ou 1.
+  defaultReplicaCount: 3
+
+  # Onde os dados dos volumes ficarão nos nós (padrão é ok, mas explicitamos)
+  defaultDataPath: /var/lib/longhorn
+
+  # Se quiser restringir a nós com label longhorn=enabled, mude para true e rotule os nós.
+  createDefaultDiskLabeledNodes: false
+
+  # Rebalanceamento automático leve (best-effort) quando cluster fica desequilibrado
+  defaultReplicaAutoBalance: best-effort
+
+  # Evita ficar sem espaço: sobreprovisionamento e reserva mínima
+  storageOverProvisioningPercentage: 200
+  storageMinimalAvailablePercentage: 10
+
+  # Política quando nó cai (geralmente seguro em labs)
+  nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+
+  # Limpeza automática de órfãos
+  orphanAutoDeletion: true
+
+  # Em labs, “best-effort” ajuda a manter dados próximos do pod quando possível
+  defaultDataLocality: best-effort
+
+# ========= Tolerations/afinidade (opcional) =========
+# Se seu master tiver taints padrão de control-plane e você quiser que componentes de controle
+# do Longhorn rodem nele, deixe como está (o chart já contempla).
+# Para forçar data plane no master (não recomendado em prod), adicione tolerations aqui.
+tolerations: []
+affinity: {}
+nodeSelector: {}
+
+# ========= Recursos (opcional, deixar leve para lab) =========
+longhornManager:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+longhornDriver:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+longhornUI:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+
+# ========= CSI / kubelet dir (ajuste somente se seu kubelet usa diretório diferente) =========
+csi:
+  kubeletRootDir: /var/lib/kubelet

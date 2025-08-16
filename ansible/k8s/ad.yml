@@ -1,0 +1,5 @@
+- name: Provision Techaux AD (OU + People)
+  hosts: dc
+  gather_facts: no
+  roles:
+    - techaux_ad
