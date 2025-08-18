@@ -1,1 +1,7 @@
 ---
+- name: Restart kubelet (master)
+  become: true
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    enabled: true

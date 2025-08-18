@@ -1,11 +1,7 @@
 ---
-- name: "worker"
-  hosts: all
-  tags: worker
+- hosts: worker
   become: true
-
+  gather_facts: yes
   roles:
-    - containerd
     - kubernetes
     - worker
-    - os

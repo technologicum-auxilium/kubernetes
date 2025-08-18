@@ -107,3 +107,19 @@ ad_org:
 # Flags para habilitar partes da role unificada
 enable_ou: true
 enable_people: true
+
+# Networking
+cidr: "10.244.0.0/16"
+
+# HA endpoint (VIP/DNS). Can be the master1 IP temporarily while you set up HA.
+control_plane_endpoint: "{{ master_ip | default(master_ips[0]) }}"
+
+# Extra SANs for the API server (optional but recommended)
+api_sans:
+  - "{{ control_plane_endpoint }}"
+  - "{{ master_ips[0] }}"
+  - "{{ master_ips[1] | default('') }}"
+  - "{{ master_ips[2] | default('') }}"
+
+# Local user who should receive kubeconfig
+user: "vagrant"

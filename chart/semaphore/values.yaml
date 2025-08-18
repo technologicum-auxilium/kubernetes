@@ -79,12 +79,15 @@ extraVolumes:
           path: credentials
         - key: config
           path: config
+  - name: aws-cli-cache
+    emptyDir: {}
 
 # -- List of extra volume mounts
 extraVolumeMounts:
   - name: aws-credentials
-    mountPath: /secrets/aws
-    readOnly: true
+    mountPath: /home/semaphore/.aws
+  - name: aws-cli-cache
+    mountPath: /home/semaphore/.aws/cli
 
 service:
   # -- Type of the service
@@ -404,14 +407,16 @@ envFromConfigMaps: []
 
 # -- Extra environment variables from mapping
 extraEnvVariables:
-  AWS_SHARED_CREDENTIALS_FILE: "/secrets/aws/credentials"
-  AWS_CONFIG_FILE: "/secrets/aws/config"
-  AWS_PROFILE: "prd"                 # para usar o perfil com role_arn
+  AWS_PROFILE: "default"
   AWS_SDK_LOAD_CONFIG: "1"
-  AWS_CACHE_DIR: "/tmp/aws-cache"    # cache do CLI fora do ~/.aws
-  AWS_CLI_HISTORY_FILE: "/tmp/aws-cli-history"
-  AWS_PAGER: ""                      # evita usar pager
-
+  AWS_CACHE_DIR: "/home/semaphore/.aws/cli/cache"
+  AWS_CLI_HISTORY_FILE: "/home/semaphore/.aws/cli/history"
+  AWS_PAGER: ""
+  AWS_SHARED_CREDENTIALS_FILE: "/home/semaphore/.aws/credentials"
+  AWS_CONFIG_FILE: "/home/semaphore/.aws/config"
+  ACCOUNT_ID: "895591388539"
+  ROLE_NAME: "Automation"
+  REGIONS: "sa-east-1,us-east-1"
 
 # -- Extra environment variables from secrets
 extraEnvSecrets: {}

@@ -1,9 +1,25 @@
----
-Kubernetes:
+k8s_repo_channel: "stable"
+k8s_repo_series: "v1.33"
+k8s_repo_base: "https://pkgs.k8s.io/core:/{{ k8s_repo_channel }}:/{{ k8s_repo_series }}/deb"
+
+kubernetes_packages:
   - kubelet
   - kubeadm
+  - kubectl
 
-sysctl:
-  - net.ipv4.ip_forward
-  - net.bridge.bridge-nf-call-iptables
-  - net.bridge.bridge-nf-call-ip6tables
+# Ajustes de estabilidade/rede (podem ser sobrepostos por group_vars)
+calico_iface_pattern: "^enp0s8$"     # ou use cidr: 192.168.100.0/24 (ver master role)
+calico_mtu: "1450"
+enable_ipvs: true
+
+sysctl_params:
+  - { name: "net.ipv4.ip_forward", value: "1" }
+  - { name: "net.bridge.bridge-nf-call-iptables", value: "1" }
+  - { name: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+  - { name: "net.ipv4.conf.all.arp_ignore", value: "1" }
+  - { name: "net.ipv4.conf.default.arp_ignore", value: "1" }
+  - { name: "net.ipv4.conf.all.arp_announce", value: "2" }
+  - { name: "net.ipv4.conf.default.arp_announce", value: "2" }
+  - { name: "net.ipv4.conf.all.rp_filter", value: "2" }
+  - { name: "net.ipv4.conf.default.rp_filter", value: "2" }
+  - { name: "net.netfilter.nf_conntrack_max", value: "262144" }

@@ -1,32 +1,306 @@
 ---
-- name: add Kubernetes apt-key
-  get_url:
-    url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
-    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
-    mode: '0644'
-    force: true
+############################
+# 0) Limpeza de repositórios K8s antigos (ANTES de qualquer apt update)
+############################
+- name: Remove old/broken Kubernetes apt sources if present
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/kubernetes.list
+    - /etc/apt/sources.list.d/kubernetes.repo
+    - /etc/apt/sources.list.d/kubernetes-stable.list
 
-- name: add Kubernetes' APT repository
-  apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+############################
+# 1) Detecta automaticamente o node_ip da bridge
+############################
+- name: Gather network facts
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+
+- name: Detect node_ip automatically (prefer 192.168.100.*, then enp0s8, then default)
+  ansible.builtin.set_fact:
+    node_ip: >-
+      {{
+        (ansible_all_ipv4_addresses
+         | select('match', '^192\\.168\\.100\\.')
+         | list
+         | first)
+        | default(ansible_facts['ansible_enp0s8']['ipv4']['address'], true)
+        | default(ansible_facts['default_ipv4']['address'])
+      }}
+
+############################
+# 2) Pré-requisitos do OS (sem update de cache ainda)
+############################
+- name: Ensure base dependencies (no cache update yet)
+  become: true
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - conntrack
     state: present
+    update_cache: no
+
+############################
+# 3) Kernel e sysctl
+############################
+- name: Disable swap (runtime)
+  become: true
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+
+- name: Disable swap (fstab)
+  become: true
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^\s*([^#]\S+)\s+\S+\s+swap\s'
+    replace: '# \1 swap was disabled for Kubernetes'
+
+- name: Load required kernel modules now
+  become: true
+  ansible.builtin.command: "modprobe {{ item }}"
+  loop: [overlay, br_netfilter, nf_conntrack]
+  changed_when: false
+
+- name: Persist required kernel modules on boot
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    mode: "0644"
+    content: |
+      overlay
+      br_netfilter
+      nf_conntrack
+
+- name: Apply common sysctl parameters
+  become: true
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    - { name: "net.ipv4.ip_forward",                 value: "1" }
+    - { name: "net.bridge.bridge-nf-call-iptables",  value: "1" }
+    - { name: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+    - { name: "net.ipv4.conf.all.arp_ignore",        value: "1" }
+    - { name: "net.ipv4.conf.default.arp_ignore",    value: "1" }
+    - { name: "net.ipv4.conf.all.arp_announce",      value: "2" }
+    - { name: "net.ipv4.conf.default.arp_announce",  value: "2" }
+    - { name: "net.ipv4.conf.all.rp_filter",         value: "2" }
+    - { name: "net.ipv4.conf.default.rp_filter",     value: "2" }
+
+- name: Check if nf_conntrack_max exists
+  become: true
+  ansible.builtin.stat:
+    path: /proc/sys/net/netfilter/nf_conntrack_max
+  register: st_conntrack
+
+- name: Set nf_conntrack_max (if available)
+  when: st_conntrack.stat.exists
+  become: true
+  ansible.builtin.sysctl:
+    name: net.netfilter.nf_conntrack_max
+    value: "262144"
+    state: present
+    reload: yes
+    sysctl_set: yes
+
+############################
+# 4) Repositório Kubernetes v1.33 (chave .gpg + repo)
+############################
+- name: Ensure keyrings directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Install Kubernetes APT key (v1.33)
+  become: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key \
+      | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  args:
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Configure Kubernetes APT repo (v1.33)
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    mode: "0644"
+    content: |
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /
+
+- name: apt-get update (after proper key+repo)
+  become: true
+  ansible.builtin.apt:
     update_cache: yes
 
-- name: Install Packages
-  apt:
-    name: "{{ item }}"
-  loop: "{{ Kubernetes }}"
-
-- name: Restart Kubelet
-  service:
-    name: kubelet
-    daemon_reload: yes
-    state: restarted
-
-- name: Ensure they can see Bridge Traffic
-  sysctl:
-    name: "{{ item }}"
-    value: '1'
-    state: present
-  loop: "{{ sysctl }}"
+############################
+# 5) containerd
+############################
+- name: Install containerd
   become: true
+  ansible.builtin.apt:
+    name: containerd
+    state: present
+
+- name: Ensure /etc/containerd exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: "0755"
+
+- name: Install containerd config (SystemdCgroup=true)
+  become: true
+  ansible.builtin.template:
+    src: containerd_config.toml.j2
+    dest: /etc/containerd/config.toml
+    mode: "0644"
+  notify: Restart containerd
+
+# ✅ Garante containerd ativo AGORA e espera pelo socket
+- name: Ensure containerd service is enabled and started
+  become: true
+  ansible.builtin.systemd:
+    name: containerd
+    enabled: true
+    state: started
+
+- name: Flush handlers (restart containerd if template changed)
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for containerd socket
+  become: true
+  ansible.builtin.wait_for:
+    path: /run/containerd/containerd.sock
+    state: present
+    timeout: 60
+
+############################
+# 6) kubelet/kubeadm/kubectl (1.33.x) + hold + node-ip
+############################
+- name: Install kubelet/kubeadm/kubectl
+  become: true
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+  register: k8s_install
+  retries: 5
+  delay: 8
+  until: k8s_install is succeeded
+
+- name: Hold kube* packages with apt-mark
+  become: true
+  ansible.builtin.shell: |
+    set -e
+    apt-mark hold kubelet kubeadm kubectl
+  changed_when: true
+
+- name: Configure kubelet to use node_ip (defaults file)
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/default/kubelet
+    mode: "0644"
+    content: |
+      KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+  notify: Restart kubelet
+
+- name: Ensure kubelet systemd drop-in dir exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/system/kubelet.service.d
+    state: directory
+    mode: "0755"
+
+- name: Write kubelet node-ip drop-in
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/kubelet.service.d/20-node-ip.conf
+    mode: "0644"
+    content: |
+      [Service]
+      Environment="KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}"
+  notify: Restart kubelet
+
+- name: Daemon-reload after kubelet config change
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+############################
+# 7) /etc/hosts e hostname
+############################
+- name: Ensure localhost lines exist
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ item.ip }} {{ item.names }}"
+    regexp: '^{{ item.ip | regex_escape }}\s+'
+    state: present
+    create: yes
+    mode: "0644"
+  loop:
+    - { ip: "127.0.0.1", names: "localhost" }
+    - { ip: "::1",       names: "ip6-localhost ip6-loopback" }
+
+- name: Remove loopback mapping for this hostname
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.[0-9]+\.1\s+{{ inventory_hostname | regex_escape }}(\b|[ \t])'
+    state: absent
+
+- name: Remove hostname alias from any 127.0.x.1 line (if present)
+  become: true
+  ansible.builtin.replace:
+    path: /etc/hosts
+    regexp: '^(127\.0\.[0-9]+\.1\s+.*)\b{{ inventory_hostname | regex_escape }}\b(.*)$'
+    replace: '\1\2'
+  failed_when: false
+
+- name: Ensure /etc/hosts maps hostname to node_ip
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^\s*{{ node_ip | regex_escape }}\s+{{ inventory_hostname | regex_escape }}(\s|$)'
+    line: "{{ node_ip }} {{ inventory_hostname }}"
+    state: present
+    create: yes
+    mode: "0644"
+  notify: Restart kubelet
+
+- name: Ensure /etc/hostname content
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/hostname
+    content: "{{ inventory_hostname }}\n"
+    mode: "0644"
+
+- name: Set runtime hostname if file changed
+  become: true
+  ansible.builtin.command: "hostnamectl set-hostname {{ inventory_hostname }}"
+  changed_when: false
+
+############################
+# 8) Habilitar kubelet
+############################
+- name: Enable kubelet
+  become: true
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+    state: started

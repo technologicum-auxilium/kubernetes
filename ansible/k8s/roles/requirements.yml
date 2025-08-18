@@ -1,5 +1,0 @@
-# collections/requirements.yml
-collections:
-  - community.windows
-  - ansible.windows
-

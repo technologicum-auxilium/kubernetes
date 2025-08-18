@@ -1,11 +1,124 @@
 ---
-- name: master
-  hosts: all
+- name: Prepare Kubernetes prerequisites on masters
+  hosts: master
   become: true
-  tags: master
-
+  gather_facts: yes
   roles:
-    - containerd
     - kubernetes
+
+- name: Initialize primary control-plane and export join artifacts
+  hosts: master[0]
+  become: true
+  gather_facts: no
+  roles:
     - master
-    - os
+
+# >>> BLOCO: garante controlPlaneEndpoint estável e renova artefatos de join
+- name: Ensure stable controlPlaneEndpoint and refresh join artifacts
+  hosts: master[0]
+  become: true
+  gather_facts: yes
+  vars:
+    # Pode sobrescrever com: -e k8s_cp_endpoint=k8s-api.local:6443
+    k8s_cp_endpoint: "{{ (ansible_all_ipv4_addresses | select('match', '^192\\.168\\.100\\.') | list | first | default(ansible_default_ipv4.address)) ~ ':6443' }}"
+  tasks:
+    - name: Ensure admin.conf exists (kubeadm init must have run)
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: st_admin
+
+    - name: Fail if admin.conf missing
+      ansible.builtin.fail:
+        msg: "admin.conf não encontrado. Rode a role 'master' (kubeadm init) no master1 antes."
+      when: not st_admin.stat.exists
+
+    - name: Read ClusterConfiguration from kubeadm-config ConfigMap
+      ansible.builtin.command: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf
+        -n kube-system get cm kubeadm-config
+        -o jsonpath='{.data.ClusterConfiguration}'
+      register: cm_out
+      changed_when: false
+
+    - name: Write ClusterConfiguration to /etc/kubernetes/kubeadm-config.yaml
+      ansible.builtin.copy:
+        dest: /etc/kubernetes/kubeadm-config.yaml
+        content: "{{ cm_out.stdout }}\n"
+        mode: "0644"
+
+    - name: Ensure controlPlaneEndpoint is set in kubeadm-config.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/kubernetes/kubeadm-config.yaml
+        regexp: '^controlPlaneEndpoint:'
+        line: "controlPlaneEndpoint: \"{{ k8s_cp_endpoint }}\""
+        insertafter: '^kind:\s*ClusterConfiguration$'
+
+    - name: Upload kubeadm config (with controlPlaneEndpoint)
+      become: true
+      block:
+        - name: kubeadm init phase upload-config kubeadm
+          ansible.builtin.command: >
+            kubeadm init phase upload-config kubeadm --config /etc/kubernetes/kubeadm-config.yaml
+      rescue:
+        - name: Fallback - apply kubeadm-config ConfigMap via kubectl
+          ansible.builtin.shell: |
+            set -e
+            kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system create configmap kubeadm-config \
+              --from-file=ClusterConfiguration=/etc/kubernetes/kubeadm-config.yaml \
+              -o yaml --dry-run=client | kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -
+          args: { executable: /bin/bash }
+
+    - name: Upload certs and get certificate-key
+      ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+      register: certs_out
+      changed_when: "'Using certificate key' in ((certs_out.stdout | default('')) + (certs_out.stderr | default(''))) or (certs_out.rc == 0)"
+
+    - name: Extract certificate key
+      ansible.builtin.set_fact:
+        _cert_key: "{{ ((certs_out.stdout + certs_out.stderr) | regex_search('Using certificate key:\\s*([a-f0-9]+)', '\\1'))[0] | default('') }}"
+
+    - name: Ensure discovery token (24h)
+      ansible.builtin.command: kubeadm token create --ttl 24h
+      register: token_out
+      changed_when: true
+
+    - name: Get CA cert hash
+      ansible.builtin.shell: |
+        openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt \
+          | openssl rsa -pubin -outform der 2>/dev/null \
+          | openssl dgst -sha256 -hex \
+          | awk '{print $2}'
+      register: ca_hash
+      changed_when: false
+
+    - name: Rewrite /etc/kubernetes/cp-join.env (used by secondary masters/workers)
+      ansible.builtin.copy:
+        dest: /etc/kubernetes/cp-join.env
+        mode: "0644"
+        content: |
+          API={{ k8s_cp_endpoint }}
+          TOKEN={{ token_out.stdout | default('') }}
+          CA_HASH=sha256:{{ ca_hash.stdout | default('') }}
+          CERT_KEY={{ _cert_key | default('') }}
+
+    - name: Wait for apiserver /readyz OK
+      ansible.builtin.command: "kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw=/readyz"
+      register: readyz
+      retries: 30
+      delay: 3
+      until: readyz.rc == 0 and ('ok' in (readyz.stdout | lower))
+      changed_when: false
+
+- name: Join secondary masters to control-plane (HA)
+  hosts: master[1:]
+  become: true
+  gather_facts: no
+  roles:
+    - controlplane
+
+- name: Install cluster add-ons on primary master
+  hosts: master[0]
+  become: true
+  gather_facts: no
+  roles:
+    - calico

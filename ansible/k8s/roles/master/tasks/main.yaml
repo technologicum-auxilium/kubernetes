@@ -1,80 +1,171 @@
 ---
-# roles/master/tasks/main.yml
+- name: Detect first master
+  ansible.builtin.set_fact:
+    _is_primary_master: "{{ inventory_hostname == groups['master'][0] }}"
 
-- name: Ensure kubelet uses bridged IP
+- name: Ensure localhost lines exist
   become: true
   ansible.builtin.lineinfile:
-    path: /etc/default/kubelet
-    create: true
-    regexp: '^KUBELET_EXTRA_ARGS='
-    line: 'KUBELET_EXTRA_ARGS="--node-ip={{ node_ip }}"'
-    mode: '0644'
+    path: /etc/hosts
+    line: "{{ item.ip }} {{ item.names }}"
+    regexp: '^{{ item.ip | regex_escape }}\s+'
+    state: present
+    create: yes
+    mode: "0644"
+  loop:
+    - { ip: "127.0.0.1", names: "localhost" }
+    - { ip: "::1",       names: "ip6-localhost ip6-loopback" }
 
-- name: Reload systemd and restart kubelet
+- name: Remove loopback mapping for this hostname
   become: true
-  ansible.builtin.shell: |
-    systemctl daemon-reload
-    systemctl restart kubelet
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.[0-9]+\.1\s+{{ inventory_hostname | regex_escape }}(\b|[ \t])'
+    state: absent
+
+- name: Remove hostname alias from any 127.0.x.1 line (if present)
+  become: true
+  ansible.builtin.replace:
+    path: /etc/hosts
+    regexp: '^(127\.0\.[0-9]+\.1\s+.*)\b{{ inventory_hostname | regex_escape }}\b(.*)$'
+    replace: '\1\2'
+  failed_when: false
+
+- name: Ensure /etc/hosts maps hostname to node_ip
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^\s*{{ node_ip | regex_escape }}\s+{{ inventory_hostname | regex_escape }}(\s|$)'
+    line: "{{ node_ip }} {{ inventory_hostname }}"
+    state: present
+    create: yes
+    mode: "0644"
+  notify: Restart kubelet (master)
+
+- name: Ensure .kube dir for vagrant
+  when: _is_primary_master
+  become: true
+  ansible.builtin.file:
+    path: /home/vagrant/.kube
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: "0755"
+
+- name: Copy admin.conf to vagrant kubeconfig (may not exist yet)
+  when: _is_primary_master
+  become: true
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/vagrant/.kube/config
+    owner: vagrant
+    group: vagrant
+    mode: "0644"
+    remote_src: true
+  ignore_errors: true
+
+- name: Symlink kubeconfig for root (may not exist yet)
+  when: _is_primary_master
+  become: true
+  ansible.builtin.file:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    state: link
+  ignore_errors: true
+
+- name: Compute apiserver SANs list
+  ansible.builtin.set_fact:
+    apiserver_sans: >-
+      {{ ([inventory_hostname, node_ip] + (extra_apiserver_sans | default([]))) | unique }}
+
+- name: Ensure /etc/kubernetes exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/kubernetes
+    state: directory
+    mode: "0755"
+
+- name: Write kubeadm config file
+  become: true
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /etc/kubernetes/kubeadm-config.yaml
+    mode: "0644"
+
+- name: Pre-pull kubeadm images (optional)
+  when: _is_primary_master
+  become: true
+  ansible.builtin.command: kubeadm config images pull
   changed_when: false
 
-- name: Check if cluster already exists
+- name: Check if admin.conf exists
+  become: true
   ansible.builtin.stat:
     path: /etc/kubernetes/admin.conf
-  register: admin_conf
+  register: st_admin
 
-- block:
-    - name: kubeadm reset (first build only)
-      become: true
-      ansible.builtin.command: kubeadm reset -f
+- name: kubeadm init (primary master)
+  when: _is_primary_master and not st_admin.stat.exists
+  become: true
+  ansible.builtin.command: >
+    kubeadm init --config /etc/kubernetes/kubeadm-config.yaml
+    --ignore-preflight-errors=NumCPU,Mem
+  register: init_out
+  changed_when: >
+    'Your Kubernetes control-plane has initialized' in (init_out.stdout|default('')) or
+    (init_out.stderr|default(''))
 
-    - name: Initialize Kubernetes Cluster
-      become: true
-      ansible.builtin.command: >
-        kubeadm init
-        --apiserver-advertise-address={{ master_ip }}
-        --apiserver-cert-extra-sans={{ master_ip }}
-        --node-name master
-        --pod-network-cidr={{ cidr }}
+- name: Copy admin.conf to vagrant kubeconfig (after init)
+  when: _is_primary_master
+  become: true
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/vagrant/.kube/config
+    owner: vagrant
+    group: vagrant
+    mode: "0644"
+    remote_src: true
 
-    - name: Create kube dir for user
-      become: true
-      ansible.builtin.file:
-        path: "/home/{{ user }}/.kube"
-        state: directory
-        owner: "{{ user }}"
-        group: "{{ user }}"
-        mode: '0755'
+- name: Wait for apiserver socket on :6443
+  when: _is_primary_master
+  become: true
+  ansible.builtin.wait_for:
+    host: "{{ node_ip }}"
+    port: 6443
+    delay: 3
+    timeout: 240
 
-    - name: Copy kubeconfig to user
-      become: true
-      ansible.builtin.copy:
-        src: /etc/kubernetes/admin.conf
-        dest: "/home/{{ user }}/.kube/config"
-        owner: "{{ user }}"
-        group: "{{ user }}"
-        mode: '0600'
-        remote_src: true
+- name: Wait for /readyz to be OK
+  when: _is_primary_master
+  become: true
+  retries: 40
+  delay: 3
+  ansible.builtin.command:
+    cmd: "kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw=/readyz"
+  register: readyz
+  until: readyz.rc == 0
+  changed_when: false
 
-    - name: Install Calico (idempotent)
-      become: false
-      environment:
-        KUBECONFIG: "/home/{{ user }}/.kube/config"
-      ansible.builtin.command: >
-        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+- name: Create control-plane join token and cert-key
+  when: _is_primary_master
+  become: true
+  ansible.builtin.shell: |
+    set -e
+    TOKEN="$(kubeadm token create)"
+    CA_HASH="$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt \
+      | openssl rsa -pubin -outform der 2>/dev/null \
+      | openssl dgst -sha256 -hex | awk '{print $2}')"
+    CERT_KEY="$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -n1)"
+    API="{{ control_plane_endpoint }}"
+    printf "API=%s\nTOKEN=%s\nCA_HASH=sha256:%s\nCERT_KEY=%s\n" "$API" "$TOKEN" "$CA_HASH" "$CERT_KEY" > /tmp/cp-join.env
+    chmod 0644 /tmp/cp-join.env
+  args: { executable: /bin/bash }
 
-    - name: Ensure master has control-plane taint (NoSchedule)
-      become: false
-      environment:
-        KUBECONFIG: "/home/{{ user }}/.kube/config"
-      ansible.builtin.command: >
-        kubectl taint nodes master node-role.kubernetes.io/control-plane=:NoSchedule --overwrite
-
-    - name: Create join command
-      become: true
-      ansible.builtin.shell: kubeadm token create --print-join-command
-      register: join_cmd
-
-    - name: Expose join command for workers
-      ansible.builtin.set_fact:
-        kube_join_command: "{{ join_cmd.stdout }}"
-  when: not admin_conf.stat.exists
+- name: Generate worker join command script
+  when: _is_primary_master
+  become: true
+  ansible.builtin.shell: |
+    set -e
+    kubeadm token create --print-join-command > /tmp/join-worker.sh
+    chmod +x /tmp/join-worker.sh
+  args: { executable: /bin/bash }

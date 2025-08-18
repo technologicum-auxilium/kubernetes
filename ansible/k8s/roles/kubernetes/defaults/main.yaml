@@ -1,1 +1,31 @@
 ---
+k8s_series: "v1.33"
+k8s_version: "1.33.*"
+
+k8s_repo_line: >-
+  deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg]
+  https://pkgs.k8s.io/core:/stable:/{{ k8s_series }}/deb/ /
+
+k8s_packages:
+  - "kubelet={{ k8s_version }}"
+  - "kubeadm={{ k8s_version }}"
+  - "kubectl={{ k8s_version }}"
+
+k8s_sysctl_params:
+  - { name: "net.ipv4.ip_forward",                 value: "1" }
+  - { name: "net.bridge.bridge-nf-call-iptables",  value: "1" }
+  - { name: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+  - { name: "net.ipv4.conf.all.arp_ignore",        value: "1" }
+  - { name: "net.ipv4.conf.default.arp_ignore",    value: "1" }
+  - { name: "net.ipv4.conf.all.arp_announce",      value: "2" }
+  - { name: "net.ipv4.conf.default.arp_announce",  value: "2" }
+  - { name: "net.ipv4.conf.all.rp_filter",         value: "2" }
+  - { name: "net.ipv4.conf.default.rp_filter",     value: "2" }
+
+k8s_nf_conntrack_max: "262144"
+
+k8s_hosts_fix_set_hostname: true
+k8s_hosts_fix_manage_netplan: false
+k8s_hosts_fix_bridge_iface: "enp0s8"
+k8s_hosts_fix_prefixlen: 24
+k8s_hosts_fix_netplan_file: "/etc/netplan/60-bridge.yaml"

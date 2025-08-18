@@ -1,1 +1,54 @@
 ---
+- name: Reload systemd
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart containerd (with diagnostics)
+  become: true
+  block:
+    - name: Restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+        enabled: true
+
+    - name: Wait for containerd socket
+      ansible.builtin.wait_for:
+        path: /run/containerd/containerd.sock
+        state: present
+        timeout: 30
+  rescue:
+    - name: Capture containerd status
+      become: true
+      ansible.builtin.command: systemctl status containerd --no-pager -l
+      register: containerd_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture containerd journal
+      become: true
+      ansible.builtin.command: journalctl -u containerd -n 200 --no-pager
+      register: containerd_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with diagnostics
+      ansible.builtin.fail:
+        msg: |
+          containerd failed to restart.
+          === systemctl status ===
+          {{ containerd_status.stdout }}
+          === journalctl -u containerd ===
+          {{ containerd_journal.stdout }}
+
+- name: Restart kubelet
+  become: true
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    enabled: true
+
+- name: Apply netplan
+  become: true
+  ansible.builtin.command: netplan apply

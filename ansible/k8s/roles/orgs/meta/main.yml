@@ -1,7 +1,0 @@
----
-galaxy_info:
-  author: techaux
-  description: Unified AD role (OU + People) for techaux.local
-  license: MIT
-  min_ansible_version: "2.15"
-dependencies: []
