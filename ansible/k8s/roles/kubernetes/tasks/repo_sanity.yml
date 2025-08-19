@@ -1,0 +1,33 @@
+---
+- name: Find legacy Kubernetes sources (*.list/*.sources and sources.list)
+  ansible.builtin.shell: |
+    {
+      grep -lR -e 'pkgs\.k8s\.io' -e 'apt\.kubernetes\.io' \
+        /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true
+    } | sort -u
+  args:
+    executable: /bin/bash
+  register: _k8s_legacy_src
+  changed_when: false
+  failed_when: false
+
+- name: Remove legacy source files under sources.list.d
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ _k8s_legacy_src.stdout_lines | reject('equalto','/etc/apt/sources.list') | list }}"
+  when: _k8s_legacy_src.stdout | length > 0
+
+- name: Purge legacy lines from /etc/apt/sources.list
+  ansible.builtin.lineinfile:
+    path: /etc/apt/sources.list
+    regexp: '^(deb .*(apt\.kubernetes\.io|pkgs\.k8s\.io).*)$'
+    state: absent
+
+- name: Remove legacy keyring files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/trusted.gpg.d/kubernetes-archive-keyring.gpg
+  ignore_errors: true

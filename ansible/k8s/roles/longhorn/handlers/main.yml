@@ -1,0 +1,6 @@
+---
+- name: Restart iscsid
+  ansible.builtin.systemd:
+    name: "{{ longhorn_iscsid_service }}"
+    state: restarted
+    enabled: true

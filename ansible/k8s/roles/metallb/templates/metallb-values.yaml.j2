@@ -1,0 +1,12 @@
+# values para o chart do MetalLB (mínimo necessário)
+controller:
+  resources:
+    requests:
+      cpu: {{ metallb_values.controller.resources.requests.cpu }}
+      memory: {{ metallb_values.controller.resources.requests.memory }}
+
+speaker:
+  resources:
+    requests:
+      cpu: {{ metallb_values.speaker.resources.requests.cpu }}
+      memory: {{ metallb_values.speaker.resources.requests.memory }}

@@ -1,0 +1,189 @@
+---
+# roles/metallb/tasks/main.yml
+
+# === 0) Resolver o host de controle (UMA VEZ) ================================
+# Preferência:
+#   1) metallb_control_host (se definido e não vazio)
+#   2) primeiro do grupo metallb_master_group
+#   3) primeiro do grupo 'controlplane'
+#   4) primeiro do grupo 'master'
+#   5) primeiro host do play
+#   6) inventory_hostname (fallback)
+
+- name: Build control-host candidate list (run once)
+  ansible.builtin.set_fact:
+    metallb_cp_candidates: >-
+      {{
+        (
+          ([] if (metallb_control_host | default('') | length == 0) else [metallb_control_host])
+          + (groups[metallb_master_group] | default([]))
+          + (groups['controlplane']       | default([]))
+          + (groups['master']             | default([]))
+          + (ansible_play_hosts_all       | default([]))
+        )
+      }}
+  run_once: true
+
+- name: Pick control host from candidates (run once)
+  ansible.builtin.set_fact:
+    metallb_cp_host: "{{ (metallb_cp_candidates | select() | list | first) | default(inventory_hostname) }}"
+    cacheable: true
+  run_once: true
+
+# Helper para acessar o cp_host resolvido de forma estável de qualquer task:
+# use SEMPRE: delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 1) Garantir Helm no host de controle ====================================
+- import_tasks: prereqs_helm.yml
+
+# === 2) Helm repo + namespace + values =======================================
+- name: Add MetalLB Helm repo
+  kubernetes.core.helm_repository:
+    name: "{{ metallb_helm_repo_name }}"
+    repo_url: "{{ metallb_helm_repo_url }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Helm repo update
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Ensure namespace exists
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ metallb_kubeconfig }}
+    get ns {{ metallb_namespace }}
+  register: _ns_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Create namespace if missing
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ metallb_kubeconfig }}
+    create ns {{ metallb_namespace }}
+  when: _ns_check.rc != 0
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Template MetalLB values
+  ansible.builtin.template:
+    src: metallb-values.yaml.j2
+    dest: /tmp/metallb-values.yaml
+    mode: "0644"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 3) Instalar/atualizar o chart ===========================================
+- name: Install/Upgrade MetalLB via Helm
+  kubernetes.core.helm:
+    name: "{{ metallb_release_name }}"
+    chart_ref: "{{ metallb_helm_repo_name }}/metallb"
+    chart_version: "{{ (metallb_chart_version | trim) if (metallb_chart_version | trim | length > 0) else omit }}"
+    release_namespace: "{{ metallb_namespace }}"
+    create_namespace: true
+    values_files:
+      - /tmp/metallb-values.yaml
+    kubeconfig: "{{ metallb_kubeconfig }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 4) IPAddressPool (render + validar + aplicar via kubectl) ===============
+- name: Render IPAddressPool manifests (robusto)
+  ansible.builtin.copy:
+    dest: "/tmp/metallb-ipool-{{ item.name }}.yaml"
+    mode: "0644"
+    content: "{{ lookup('template', 'ipaddresspool.yaml.j2', template_vars={'item': item}) }}"
+  loop: "{{ metallb_address_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Stat IPAddressPool manifests
+  ansible.builtin.stat:
+    path: "/tmp/metallb-ipool-{{ item.name }}.yaml"
+  register: _ipool_stat
+  loop: "{{ metallb_address_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Assert IPAddressPool manifests are non-empty
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - (item.stat.size | int) > 0
+    fail_msg: "Rendered {{ item.stat.path }} is empty"
+    success_msg: "OK: {{ item.stat.path }} has content"
+  loop: "{{ _ipool_stat.results }}"
+  loop_control:
+    label: "{{ item.stat.path | default('unknown') }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Apply IPAddressPool manifests
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ metallb_kubeconfig }}
+    apply -f /tmp/metallb-ipool-{{ item.name }}.yaml
+  loop: "{{ metallb_address_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: apply_ipool
+  changed_when: >
+    ('created' in (apply_ipool.stdout | default(''))) or
+    ('configured' in (apply_ipool.stdout | default('')))
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 5) L2Advertisement (render + validar + aplicar via kubectl) =============
+- name: Render L2Advertisement manifests (robusto)
+  ansible.builtin.copy:
+    dest: "/tmp/metallb-l2adv-{{ item.name }}.yaml"
+    mode: "0644"
+    content: "{{ lookup('template', 'l2advertisement.yaml.j2', template_vars={'item': item}) }}"
+  loop: "{{ metallb_l2advertisements }}"
+  loop_control:
+    label: "{{ item.name }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Stat L2Advertisement manifests
+  ansible.builtin.stat:
+    path: "/tmp/metallb-l2adv-{{ item.name }}.yaml"
+  register: _l2_stat
+  loop: "{{ metallb_l2advertisements }}"
+  loop_control:
+    label: "{{ item.name }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Assert L2Advertisement manifests are non-empty
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - (item.stat.size | int) > 0
+    fail_msg: "Rendered {{ item.stat.path }} is empty"
+    success_msg: "OK: {{ item.stat.path }} has content"
+  loop: "{{ _l2_stat.results }}"
+  loop_control:
+    label: "{{ item.stat.path | default('unknown') }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Apply L2Advertisement manifests
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ metallb_kubeconfig }}
+    apply -f /tmp/metallb-l2adv-{{ item.name }}.yaml
+  loop: "{{ metallb_l2advertisements }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: apply_l2
+  changed_when: >
+    ('created' in (apply_l2.stdout | default(''))) or
+    ('configured' in (apply_l2.stdout | default('')))
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"

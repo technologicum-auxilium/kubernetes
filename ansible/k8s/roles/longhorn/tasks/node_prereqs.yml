@@ -1,0 +1,18 @@
+---
+- name: Install Longhorn node prerequisites on all nodes
+  ansible.builtin.apt:
+    name: "{{ longhorn_required_packages }}"
+    state: present
+    update_cache: yes
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['all'] }}"
+  run_once: true
+
+- name: Ensure iscsid enabled and running on all nodes
+  ansible.builtin.systemd:
+    name: "{{ longhorn_iscsid_service }}"
+    state: started
+    enabled: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['all'] }}"
+  run_once: true

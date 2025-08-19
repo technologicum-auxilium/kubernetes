@@ -1,0 +1,18 @@
+---
+# Você pediu essas duas no vars:
+longhorn_ingress_host: "longhorn.techaux.com.br"
+longhorn_master_group: "master"
+
+# Opcional: forçar o host onde rodar o Helm (senão a role descobre)
+longhorn_control_host: ""
+
+# Chart/namespace
+longhorn_chart_version: ""                 # vazio = pega a mais recente do repo
+longhorn_namespace: "longhorn-system"
+longhorn_kubeconfig: "/etc/kubernetes/admin.conf"
+
+# Pré-requisitos nos nós (Longhorn data plane)
+longhorn_required_packages:
+  - open-iscsi
+  - nfs-common
+longhorn_iscsid_service: "iscsid"

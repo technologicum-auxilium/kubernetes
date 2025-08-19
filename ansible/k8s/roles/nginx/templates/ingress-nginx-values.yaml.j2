@@ -1,0 +1,47 @@
+---
+controller:
+  ingressClassResource:
+    name: {{ nginx_ingress_class_name }}
+    enabled: true
+    default: {{ nginx_ingress_set_default_class | bool | lower }}
+    controllerValue: "k8s.io/{{ nginx_ingress_class_name }}"
+
+  ingressClass: {{ nginx_ingress_class_name }}
+
+  resources:
+    requests:
+      cpu: {{ nginx_ingress_controller_requests.cpu }}
+      memory: {{ nginx_ingress_controller_requests.memory }}
+
+  service:
+    enabled: true
+    type: {{ nginx_ingress_service_type }}
+{% if nginx_ingress_service_type == 'LoadBalancer' and nginx_ingress_loadbalancer_ip|default('')|length > 0 %}
+    loadBalancerIP: {{ nginx_ingress_loadbalancer_ip }}
+{% endif %}
+    annotations:
+{% for k, v in nginx_ingress_svc_annotations.items() %}
+      {{ k }}: {{ v | to_nice_yaml(indent=0) | trim }}
+{% endfor %}
+{% if nginx_ingress_service_type == 'NodePort' %}
+    nodePorts:
+      http: {{ nginx_ingress_node_ports.http | int }}
+      https: {{ nginx_ingress_node_ports.https | int }}
+{% endif %}
+
+  admissionWebhooks:
+    enabled: true
+    patch:
+      enabled: true
+
+  metrics:
+    enabled: false
+
+  extraArgs: {}
+  extraEnvs: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  tolerations: {{ nginx_ingress_tolerations | to_nice_yaml(indent=2) | trim }}
+  affinity: {{ nginx_ingress_affinity | to_nice_yaml(indent=2) | trim }}
+  nodeSelector: {{ nginx_ingress_nodeSelector | to_nice_yaml(indent=2) | trim }}

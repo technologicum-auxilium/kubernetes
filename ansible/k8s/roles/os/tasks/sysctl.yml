@@ -1,0 +1,19 @@
+---
+# Aplicar todos os parâmetros e persistir em /etc/sysctl.d/99-kubernetes.conf
+- name: Apply Kubernetes sysctl tunings
+  ansible.builtin.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+  loop: "{{ os_sysctl | dict2items }}"
+  become: true
+
+# Alguns kernels só criam /proc/ entries após módulo carregado
+- name: Ensure bridge sysctls exist (best-effort)
+  ansible.builtin.command: sysctl --system
+  become: true
+  changed_when: false
+  notify: reload sysctl

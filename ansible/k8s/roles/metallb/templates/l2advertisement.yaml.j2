@@ -1,0 +1,10 @@
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: {{ item.name }}
+  namespace: {{ metallb_namespace }}
+spec:
+  ipAddressPools:
+{% for p in item.ipAddressPools %}
+    - {{ p }}
+{% endfor %}

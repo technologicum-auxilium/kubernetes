@@ -1,0 +1,30 @@
+---
+nginx_ingress_master_group: "master"
+nginx_ingress_control_host: ""
+nginx_ingress_kubeconfig: "/etc/kubernetes/admin.conf"
+
+nginx_ingress_namespace: "ingress-nginx"
+nginx_ingress_release_name: "ingress-nginx"
+nginx_ingress_chart_version: ""
+nginx_ingress_repo_name: "ingress-nginx"
+nginx_ingress_repo_url: "https://kubernetes.github.io/ingress-nginx"
+
+nginx_ingress_service_type: "LoadBalancer"
+nginx_ingress_loadbalancer_ip: "192.168.100.100"
+nginx_ingress_node_ports:
+  http: 0
+  https: 0
+
+nginx_ingress_class_name: "nginx"
+nginx_ingress_set_default_class: true
+
+nginx_ingress_controller_requests:
+  cpu: "100m"
+  memory: "128Mi"
+
+nginx_ingress_svc_annotations:
+  metallb.universe.tf/address-pool: "default-pool"
+
+nginx_ingress_tolerations: []
+nginx_ingress_affinity: {}
+nginx_ingress_nodeSelector: {}

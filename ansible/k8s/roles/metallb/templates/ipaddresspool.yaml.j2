@@ -1,0 +1,10 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: {{ item.name }}
+  namespace: {{ metallb_namespace }}
+spec:
+  addresses:
+{% for cidr in item.addresses %}
+    - {{ cidr }}
+{% endfor %}

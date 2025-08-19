@@ -1,0 +1,34 @@
+---
+metallb_master_group: "master"
+
+metallb_control_host: ""
+
+metallb_kubeconfig: "/etc/kubernetes/admin.conf"
+
+metallb_namespace: "metallb-system"
+metallb_chart_version: ""
+metallb_helm_repo_name: "metallb"
+metallb_helm_repo_url: "https://metallb.github.io/metallb"
+metallb_release_name: "metallb"
+
+metallb_values:
+  controller:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+  speaker:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+metallb_address_pools:
+  - name: "default-pool"
+    addresses:
+      - "192.168.100.100-192.168.100.110"
+
+metallb_l2advertisements:
+  - name: "default-l2adv"
+    ipAddressPools:
+      - "default-pool"

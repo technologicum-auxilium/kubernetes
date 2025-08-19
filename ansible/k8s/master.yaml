@@ -5,7 +5,12 @@
   tags: master
 
   roles:
+    - os
     - containerd
     - kubernetes
     - master
-    - os
+    - longhorn
+    - metallb
+    - nginx
+    - prometheus
+    - semaphore

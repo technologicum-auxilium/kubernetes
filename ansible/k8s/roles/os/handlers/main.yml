@@ -1,3 +1,10 @@
-#SPDX-License-Identifier: MIT-0
 ---
-# handlers file for os
+- name: reload sysctl
+  ansible.builtin.command: sysctl --system
+  become: true
+
+- name: restart chrony
+  ansible.builtin.service:
+    name: chrony
+    state: restarted
+  become: true

@@ -1,0 +1,15 @@
+---
+- name: Download Helm install script
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    dest: /tmp/get-helm-3.sh
+    mode: "0755"
+  run_once: true
+  delegate_to: "{{ metallb_cp_host }}"
+
+- name: Install Helm (if not present)
+  ansible.builtin.command: /tmp/get-helm-3.sh
+  args:
+    creates: /usr/local/bin/helm
+  run_once: true
+  delegate_to: "{{ metallb_cp_host }}"

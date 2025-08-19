@@ -1,13 +1,10 @@
 ---
 galaxy_info:
-  role_name: so
-  author: Seu Nome
-  description: Instala open-iscsi e habilita o serviço iscsid
+  author: techaux
+  description: "Hardening básico de OS para Kubernetes (VirtualBox/Vagrant, Ubuntu 22.04)."
   license: MIT
-  min_ansible_version: "2.9"
+  min_ansible_version: "2.12"
   platforms:
-    - name: Debian
-      versions: [all]
     - name: Ubuntu
-      versions: [all]
+      versions: [jammy]
 dependencies: []

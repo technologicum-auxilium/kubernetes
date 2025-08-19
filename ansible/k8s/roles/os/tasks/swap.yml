@@ -1,0 +1,22 @@
+---
+- name: Disable swap immediately
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+  failed_when: false
+  become: true
+
+# Comenta TODAS as entradas de swap no fstab (swapfile, partição etc.)
+- name: Comment out swap entries in /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(?!#).*?\s+swap\s+.*$'
+    replace: '# \g<0>'
+    backup: yes
+  become: true
+
+- name: Remove default /swapfile if present (optional)
+  ansible.builtin.file:
+    path: /swapfile
+    state: absent
+  become: true
+  ignore_errors: true

@@ -1,0 +1,368 @@
+---
+# -- Override the name
+nameOverride: ""
+
+# -- Override the fullname
+fullnameOverride: ""
+
+# -- Replicas for the deployment
+replicaCount: 1
+
+config:
+  # -- List of environment variables to forward into the application environment.
+  # Modify this list if additional environment variables need to be accessible.
+  forwarded_env_vars: []
+
+image:
+  # -- Image repository used by deployment
+  repository: semaphoreui/semaphore
+
+  # -- Optional tag for the repository, defaults to app version
+  tag: "latest"
+
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+
+  # -- Optional name of pull secret if using a private registry
+  pullSecrets: []
+
+serviceAccount:
+  # -- Create a new service account
+  create: true
+
+  # -- Optional name for an existing service account
+  name: ""
+
+  # -- Define annotations for the service account
+  annotations: {}
+
+# -- Defines dnsConfig for the deployment
+# dnsConfig:
+  # nameservers:      # List of IPs
+  #   - 1.1.1.1
+  # searches:         # Search domains
+  #   - ns1.svc.cluster.local
+  # options:          # Resolver options
+  #   - name: ndots
+  #     value: "2"
+
+# -- Updaqte strategy for deployment
+updateStrategy:
+  type: Recreate
+
+# -- Define additional labels
+labels: {}
+
+# -- Define additional annotations
+annotations: {}
+
+# -- Security context for the deployment
+securityContext:
+  fsGroup: 1001
+
+# -- Security context for the pod
+podSecurityContext: {}
+
+# -- List of extra init containers
+extraInitContainers: []
+
+# -- List of extra sidecar containers
+extraSidecarContainers: []
+
+# -- List of extra volumes
+extraVolumes:
+  - name: aws-credentials
+    secret:
+      secretName: aws-credentials
+      items:
+        - key: credentials
+          path: credentials
+        - key: config
+          path: config
+
+# -- List of extra volume mounts
+extraVolumeMounts:
+  - name: aws-credentials
+    mountPath: /secrets/aws
+    readOnly: true
+
+service:
+  # -- Type of the service
+  type: ClusterIP
+
+  # -- (int) Port of the service
+  port: 3000
+
+  # -- (int) Internal port of the service
+  internalPort: 3000
+
+  # -- Additional annotations for the service
+  annotations: {}
+
+  # -- Additional labels for the service
+  labels: {}
+
+ingress:
+  # -- Enable ingress
+  enabled: true
+
+  # -- (string) Class name for the ingress resource
+  className: nginx
+
+  # -- Host definition for ingress
+  hosts:
+    - host: semaphore.techaux.com.br
+      paths:
+        - path: /
+          pathType: Prefix
+
+  # -- Optional TLS configuration for ingress
+  tls: []
+
+  # -- Additional annotations for the ingress
+  annotations: {}
+
+  # -- Additional labels for the ingress
+  labels: {}
+
+persistence:
+  # -- Enable persistence for workdir
+  enabled: true
+
+  # -- Size for boltdb volume
+  size: 10G
+
+  # -- Storage class used for workdir volume
+  storageClass: longhorn
+
+  # -- Access modes used for workdir volume
+  accessModes:
+    - ReadWriteOnce
+
+  # -- Name of an already existing claim
+  existingClaim:
+
+secrets:
+  # -- Cookie hash secret, generated if not present
+  cookieHash:
+
+  # -- Key used within secret for cookieHash
+  cookieHashKey: cookieHash
+
+  # -- Cookie encryption secret, generated if not present
+  cookieEncryption:
+
+  # -- Key used within secret for cookieEncryption
+  cookieEncryptionKey: cookieEncryption
+
+  # -- Access key encryption secret, generated if not present
+  accesskeyEncryption:
+
+  # -- Key used within secret for accesskeyEncryption
+  accesskeyEncryptionKey: accesskeyEncryption
+
+  # -- Existing secret to use for secrets
+  existingSecret:
+
+general:
+  # -- Host to access Semaphore
+  host:
+
+  # -- Use Git client implementation
+  gitClient: cmd_git
+
+  # -- Working directory for Semaphore
+  tmpPath: /tmp/semaphore
+
+  # -- Maximum parallel tasks
+  maxParallelTasks: 0
+
+  # -- Disable password login
+  passwordLoginDisable: false
+
+  # -- Allow non-admins to create projects
+  nonAdminCanCreateProject: false
+
+  # -- Enable usage of remote runners
+  useRemoteRunner: false
+
+  # -- Path to SSH config
+  sshConfigPath:
+
+  # -- Additional Python packages
+  additionalPythonPackages:
+    - awscli==1.*
+    - boto3
+
+database:
+  # -- Type of database backend
+  type: bolt
+
+  # -- Read username from secret
+  usernameFromSecret: true
+
+  # -- Username for database
+  username: semaphore
+
+  # -- Key used within secret for username
+  usernameKey: username
+
+  # -- Password for database
+  password:
+
+  # -- Key used within secret for password
+  passwordKey: password
+
+  # -- Existing secret to use for credentials
+  existingSecret:
+
+  # -- Host for database connection
+  host:
+
+  # -- Port for database connection
+  port:
+
+  # -- Name of the used database
+  name: semaphore
+
+  # -- Options for database connection
+  options: {}
+
+  # -- Path for the boltdb
+  path: /var/lib/semaphore/database.boltdb
+
+  persistence:
+    # -- Enable persistence for boltdb
+    enabled: true
+
+    # -- Size for boltdb volume
+    size: 5G
+
+    # -- Storage class used for boltdb volume
+    storageClass: longhorn
+
+    # -- Access modes used for boltdb volume
+    accessModes:
+      - ReadWriteOnce
+
+    # -- Name of an already existing claim
+    existingClaim:
+
+ldap:
+  enable: true
+  server: "192.168.100.62:389"
+  needtls: false
+  searchdn: "DC=techaux,DC=local"
+  filter: "(&(objectClass=user)(sAMAccountName=%s)(memberOf=CN=GG-Semaphore-Users-PRD,OU=Groups,DC=techaux,DC=local))"
+  binddn: "CN=svc-semaphore-prd,OU=Semaphore,OU=Service Accounts,DC=techaux,DC=local"
+  binddnKey: username
+  password: ""
+  passwordKey: password
+  existingSecret: "semaphore-ldap-credentials"
+
+  mappings:
+    dn: distinguishedName
+    mail: userPrincipalName
+    uid: sAMAccountName
+    cn: cn
+    givenName: givenName
+    sn: sn
+    memberOf: memberOf
+
+oidc:
+  enable: false
+  providers: {}
+
+email:
+  alert: false
+  sender:
+  host:
+  port:
+  secure: false
+  username:
+  usernameKey: username
+  password:
+  passwordKey: password
+  existingSecret:
+
+telegram:
+  alert: false
+  chat:
+  chatKey: chat
+  token:
+  tokenKey: token
+  existingSecret:
+
+slack:
+  alert: false
+  url:
+  urlKey: url
+  existingSecret:
+
+runner:
+  token:
+  tokenKey: token
+  existingSecret:
+
+admin:
+  create: true
+  fullname: Admin
+  fullnameKey: fullname
+  username: admin
+  usernameKey: username
+  password: Techaux@2016
+  passwordKey: password
+  email: admin@techaux.local
+  emailKey: email
+  existingSecret:
+
+resources:
+  limits: {}
+  requests:
+    cpu: 100m
+    memory: 64Mi
+
+nodeSelector: {}
+affinity: {}
+tolerations: []
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnvVariables:
+  AWS_SHARED_CREDENTIALS_FILE: "/secrets/aws/credentials"
+  AWS_CONFIG_FILE: "/secrets/aws/config"
+  AWS_PROFILE: "prd"
+  AWS_SDK_LOAD_CONFIG: "1"
+  AWS_CACHE_DIR: "/tmp/aws-cache"
+  AWS_CLI_HISTORY_FILE: "/tmp/aws-cli-history"
+  AWS_PAGER: ""
+extraEnvSecrets: {}
+
+mariadb:
+  enabled: false
+  fullnameOverride: mariadb
+  architecture: standalone
+  auth:
+    database: semaphore
+    username: semaphore
+    password:
+  serviceAccount:
+    create: true
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+
+postgresql:
+  enabled: true
+  fullnameOverride: postgresql
+  architecture: standalone
+  auth:
+    database: semaphore
+    username: semaphore
+    password: semaphore
+  serviceAccount:
+    create: true
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false

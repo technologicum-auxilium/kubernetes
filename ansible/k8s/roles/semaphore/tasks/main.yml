@@ -1,0 +1,89 @@
+---
+# === 0) Resolver o host de controle (UMA VEZ) =================================
+- name: Build control-host candidate list (run once)
+  ansible.builtin.set_fact:
+    semaphore_cp_candidates: >-
+      {{
+        (
+          ([] if (semaphore_control_host | default('') | length == 0) else [semaphore_control_host])
+          + (groups[semaphore_master_group] | default([]))
+          + (groups['controlplane']         | default([]))
+          + (groups['master']               | default([]))
+          + (ansible_play_hosts_all         | default([]))
+        )
+      }}
+  run_once: true
+
+- name: Pick control host from candidates (run once)
+  ansible.builtin.set_fact:
+    semaphore_cp_host: "{{ (semaphore_cp_candidates | select() | list | first) | default(inventory_hostname) }}"
+    cacheable: true
+  run_once: true
+
+# === 1) Garantir Helm no host de controle ====================================
+- import_tasks: prereqs_helm.yml
+
+# === 2) Helm repo + namespace + values =======================================
+- name: Add Semaphore Helm repo
+  kubernetes.core.helm_repository:
+    name: "{{ semaphore_repo_name }}"
+    repo_url: "{{ semaphore_repo_url }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].semaphore_cp_host }}"
+
+- name: Helm repo update
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].semaphore_cp_host }}"
+
+- name: Ensure namespace exists
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ semaphore_kubeconfig }}
+    get ns {{ semaphore_namespace }}
+  register: _ns_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].semaphore_cp_host }}"
+
+- name: Create namespace if missing
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ semaphore_kubeconfig }}
+    create ns {{ semaphore_namespace }}
+  when: _ns_check.rc != 0
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].semaphore_cp_host }}"
+
+- name: Template Semaphore values (seu values.yaml)
+  ansible.builtin.template:
+    src: semaphore-values.yaml.j2
+    dest: /tmp/semaphore-values.yaml
+    mode: "0644"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].semaphore_cp_host }}"
+
+# === 3) Instalar/atualizar o chart ===========================================
+- name: Install/Upgrade Semaphore via Helm
+  kubernetes.core.helm:
+    name: "{{ semaphore_release_name }}"
+    chart_ref: "{{ semaphore_repo_name }}/semaphore"
+    chart_version: "{{ (semaphore_chart_version | trim) if (semaphore_chart_version | trim | length > 0) else omit }}"
+    release_namespace: "{{ semaphore_namespace }}"
+    create_namespace: true
+    values_files:
+      - /tmp/semaphore-values.yaml
+    kubeconfig: "{{ semaphore_kubeconfig }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].semaphore_cp_host }}"
+
+# === 4) Espera básica do deployment ==========================================
+- name: Wait for Semaphore rollout
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ semaphore_kubeconfig }}
+    -n {{ semaphore_namespace }} rollout status
+    deploy/{{ semaphore_release_name }} --timeout={{ semaphore_rollout_timeout }}
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].semaphore_cp_host }}"

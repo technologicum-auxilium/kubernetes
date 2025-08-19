@@ -1,0 +1,43 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: true
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ os_packages }}"
+    state: present
+  become: true
+
+- name: Ensure chrony configured (optional)
+  ansible.builtin.lineinfile:
+    path: /etc/chrony/chrony.conf
+    regexp: '^pool '
+    line: 'pool pool.ntp.org iburst'
+    create: yes
+    backup: yes
+  when: os_manage_time
+  notify: restart chrony
+  become: true
+
+- name: Add extra NTP servers (if any)
+  ansible.builtin.blockinfile:
+    path: /etc/chrony/chrony.conf
+    marker: "# {mark} MANAGED BY ANSIBLE - EXTRA NTP"
+    block: |
+      {% for ntp in os_ntp_servers %}
+      server {{ ntp }} iburst
+      {% endfor %}
+  when: os_manage_time and (os_ntp_servers | length) > 0
+  notify: restart chrony
+  become: true
+
+- name: Enable and start chrony (if managed)
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: yes
+  when: os_manage_time
+  become: true

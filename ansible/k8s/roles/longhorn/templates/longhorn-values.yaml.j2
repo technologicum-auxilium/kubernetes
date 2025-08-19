@@ -1,0 +1,45 @@
+# Longhorn Helm chart values (parametrizado)
+
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  host: {{ longhorn_ingress_host }}
+  path: /
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+
+defaultSettings:
+  defaultReplicaCount: 3
+  defaultDataPath: /var/lib/longhorn
+  createDefaultDiskLabeledNodes: false
+  defaultReplicaAutoBalance: best-effort
+  storageOverProvisioningPercentage: 200
+  storageMinimalAvailablePercentage: 10
+  nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+  orphanAutoDeletion: true
+  defaultDataLocality: best-effort
+
+tolerations: []
+affinity: {}
+nodeSelector: {}
+
+longhornManager:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+longhornDriver:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+longhornUI:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+
+csi:
+  kubeletRootDir: /var/lib/kubelet

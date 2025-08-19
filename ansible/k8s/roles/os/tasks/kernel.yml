@@ -1,0 +1,57 @@
+---
+# Carregar módulos no boot
+- name: Deploy modules file for Kubernetes (inline)
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    mode: '0644'
+    content: |
+      overlay
+      br_netfilter
+      # Descomente se for usar kube-proxy em modo IPVS:
+      # ip_vs
+      # ip_vs_rr
+      # ip_vs_wrr
+      # ip_vs_sh
+      # nf_conntrack
+
+# Carregar agora (sem reboot)
+- name: Load required kernel modules now
+  ansible.builtin.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ os_load_kernel_modules }}"
+  become: true
+
+- name: Try loading optional kernel modules
+  ansible.builtin.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ os_optional_kernel_modules }}"
+  ignore_errors: true
+  become: true
+
+# Backend do iptables (opcional)
+- name: Switch iptables backend to legacy
+  ansible.builtin.command: "update-alternatives --set {{ item.bin }} {{ item.legacy }}"
+  loop:
+    - { bin: 'iptables',   legacy: '/usr/sbin/iptables-legacy'   }
+    - { bin: 'ip6tables',  legacy: '/usr/sbin/ip6tables-legacy'  }
+    - { bin: 'arptables',  legacy: '/usr/sbin/arptables-legacy'  }
+    - { bin: 'ebtables',   legacy: '/usr/sbin/ebtables-legacy'   }
+  when: os_set_iptables_backend == 'legacy'
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Switch iptables backend to nft
+  ansible.builtin.command: "update-alternatives --set {{ item.bin }} {{ item.nft }}"
+  loop:
+    - { bin: 'iptables',   nft: '/usr/sbin/iptables-nft'   }
+    - { bin: 'ip6tables',  nft: '/usr/sbin/ip6tables-nft'  }
+    - { bin: 'arptables',  nft: '/usr/sbin/arptables-nft'  }
+    - { bin: 'ebtables',   nft: '/usr/sbin/ebtables-nft'   }
+  when: os_set_iptables_backend == 'nft'
+  changed_when: true
+  failed_when: false
+  become: true

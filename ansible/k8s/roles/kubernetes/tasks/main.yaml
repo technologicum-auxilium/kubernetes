@@ -1,32 +1,198 @@
 ---
-- name: add Kubernetes apt-key
-  get_url:
-    url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
-    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
-    mode: '0644'
-    force: true
+# =====================================================================
+# 0) PRÉ-REQUISITOS DE REDE (módulos e sysctl) — exigidos pelo kubeadm
+# =====================================================================
+- name: Ensure kernel modules file for Kubernetes
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    mode: "0644"
+    content: |
+      overlay
+      br_netfilter
 
-- name: add Kubernetes' APT repository
-  apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+- name: Load kernel modules now
+  ansible.builtin.modprobe:
+    name: "{{ item }}"
     state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Ensure sysctl params for Kubernetes networking
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/k8s.conf
+    mode: "0644"
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+
+- name: Apply sysctl params
+  ansible.builtin.command: sysctl --system
+  register: _sysctl_apply
+  changed_when: true
+
+# =====================================================================
+# 1) Limpeza de repositórios antigos (evita conflito Signed-By)
+# =====================================================================
+- name: Kubernetes APT repo sanity (remove legacy/conflicting sources)
+  ansible.builtin.import_tasks: "{{ role_path }}/tasks/repo_sanity.yml"
+
+# =====================================================================
+# 2) Repo oficial pkgs.k8s.io (com keyring dedicado)
+# =====================================================================
+- name: Ensure keyrings dir
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Download Kubernetes apt key (pkgs.k8s.io)
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/{{ k8s_repo_channel | default('v1.29') }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: "0644"
+
+- name: De-armor key to gpg
+  ansible.builtin.command:
+    cmd: gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Add Kubernetes apt repo (pkgs.k8s.io)
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ k8s_repo_channel | default('v1.29') }}/deb/ /"
+    filename: kubernetes
+    state: present
+
+- name: Update apt cache
+  ansible.builtin.apt:
     update_cache: yes
 
-- name: Install Packages
-  apt:
-    name: "{{ item }}"
-  loop: "{{ Kubernetes }}"
+# =====================================================================
+# 3) Instala kubelet/kubeadm/kubectl com pin automático (e permite downgrade)
+#    kube_version aceita:
+#      - "1.29"    -> última 1.29.x-*-*
+#      - "1.29.6"  -> 1.29.6-*-*
+#      - ""        -> mais recente do canal configurado
+# =====================================================================
+- name: Normalize kube_version to string
+  ansible.builtin.set_fact:
+    kube_version_str: "{{ (kube_version | default('') ) | string }}"
 
-- name: Restart Kubelet
-  service:
-    name: kubelet
-    daemon_reload: yes
-    state: restarted
+# Tenta madison primeiro; se vier vazio, cai para 'apt-cache show -a'
+- name: Query available kubelet versions (robusto)
+  ansible.builtin.shell: |
+    set -o pipefail
+    VERS="$(apt-cache madison kubelet 2>/dev/null | awk '{print $3}')"
+    if [ -z "$VERS" ]; then
+      VERS="$(apt-cache show -a kubelet 2>/dev/null | awk '/^Version: /{print $2}')"
+    fi
+    printf "%s\n" "$VERS" | sed '/^$/d' | sort -Vr
+  args:
+    executable: /bin/bash
+  register: _kubelet_versions
+  changed_when: false
 
-- name: Ensure they can see Bridge Traffic
-  sysctl:
+# Para debug (opcional)
+- name: Show discovered kubelet versions
+  ansible.builtin.debug:
+    var: _kubelet_versions.stdout_lines
+  when: _kubelet_versions.stdout_lines is defined
+
+- name: Compute target version prefix
+  ansible.builtin.set_fact:
+    _target_prefix: >-
+      {% if kube_version_str | length == 0 -%}
+      ''
+      {%- elif kube_version_str is match('^\\d+\\.\\d+\\.\\d+$') -%}
+      ^{{ kube_version_str | regex_escape() }}-
+      {%- elif kube_version_str is match('^\\d+\\.\\d+$') -%}
+      ^{{ kube_version_str | regex_escape() }}\\.
+      {%- else -%}
+      ^{{ kube_version_str | regex_escape() }}
+      {%- endif -%}
+
+# Se tiver prefixo, filtra; senão pega a primeira (mais recente após sort -Vr)
+- name: Pick best matching kubelet version
+  ansible.builtin.set_fact:
+    __pin_version: >-
+      {{
+        (_kubelet_versions.stdout_lines
+          | select('search', _target_prefix)
+          | list
+          | first)
+        if (_target_prefix | length > 0)
+        else (_kubelet_versions.stdout_lines | first | default(''))
+      }}
+
+# Fallback adicional: usa Candidate do apt-cache policy se ainda não houver pin
+- name: Fallback to apt-cache policy Candidate if pin is still empty
+  ansible.builtin.shell: |
+    apt-cache policy kubelet | awk '/Candidate:/ {print $2}'
+  args:
+    executable: /bin/bash
+  register: _kubelet_candidate
+  changed_when: false
+  when: (__pin_version | default('')) | length == 0
+
+- name: Use Candidate as pin when available
+  ansible.builtin.set_fact:
+    __pin_version: "{{ _kubelet_candidate.stdout | trim }}"
+  when: (__pin_version | default('')) | length == 0 and (_kubelet_candidate.stdout | trim) | length > 0
+
+- name: Fail if no matching kubelet version was found
+  ansible.builtin.fail:
+    msg: >-
+      Não encontrei versão para kubelet (prefixo '{{ _target_prefix }}').
+      Verifique seu repositório pkgs.k8s.io (canal: {{ k8s_repo_channel | default('v1.29') }})
+      e a saída de 'apt-cache madison kubelet'.
+  when: (__pin_version | default('')) | length == 0
+
+# Remove hold caso exista, para permitir (down)grade
+- name: Unhold kube* packages if previously held
+  ansible.builtin.dpkg_selections:
     name: "{{ item }}"
-    value: '1'
+    selection: install
+  loop: [kubelet, kubeadm, kubectl]
+  ignore_errors: true
+
+- name: Install kubelet/kubeadm/kubectl (pinned, allow downgrade)
+  ansible.builtin.apt:
+    name:
+      - "kubelet={{ __pin_version }}"
+      - "kubeadm={{ __pin_version }}"
+      - "kubectl={{ __pin_version }}"
     state: present
-  loop: "{{ sysctl }}"
-  become: true
+    update_cache: yes
+    allow_downgrade: yes
+
+- name: Hold kube* packages (lock)
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubeadm, kubectl]
+
+# =====================================================================
+# 4) Kubelet anunciando o IP da BRIDGE 192.168.100.* (auto-detecção)
+# =====================================================================
+- name: Detect bridged IP in 192.168.100.0/24
+  ansible.builtin.set_fact:
+    bridged_ip: >-
+      {{ ansible_all_ipv4_addresses
+         | select('match', '^192\.168\.100\..*')
+         | list
+         | first
+         | default(hostvars[inventory_hostname].ansible_host, true) }}
+
+- name: Configure kubelet to advertise bridged IP
+  ansible.builtin.copy:
+    dest: /etc/default/kubelet
+    mode: "0644"
+    content: |
+      KUBELET_EXTRA_ARGS=--node-ip={{ bridged_ip }}
+  notify: Restart kubelet
+
+- name: Enable kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true

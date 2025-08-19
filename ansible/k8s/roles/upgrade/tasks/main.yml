@@ -1,0 +1,50 @@
+---
+# tasks/main.yml
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Ensure Kubernetes apt repo exists
+  copy:
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    content: |
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /
+    mode: '0644'
+
+- name: Upgrade kubeadm
+  apt:
+    name: "kubeadm={{ kube_version }}-1.1"
+    state: present
+    allow_downgrades: yes
+
+- name: Plan upgrade with kubeadm
+  command: kubeadm upgrade plan
+  register: upgrade_plan
+  changed_when: false
+
+- name: Apply upgrade
+  command: kubeadm upgrade apply -y v{{ kube_version }}
+  when: inventory_hostname == groups['master'][0]
+
+- name: Drain node before upgrading kubelet/kubectl
+  command: kubectl drain {{ inventory_hostname }} --ignore-daemonsets --delete-local-data
+  when: inventory_hostname != groups['master'][0]
+
+- name: Upgrade kubelet and kubectl
+  apt:
+    name:
+      - "kubelet={{ kube_version }}-1.1"
+      - "kubectl={{ kube_version }}-1.1"
+    state: present
+    allow_downgrades: yes
+
+- name: Restart kubelet
+  systemd:
+    name: kubelet
+    state: restarted
+    enabled: yes
+
+- name: Uncordon node
+  command: kubectl uncordon {{ inventory_hostname }}
+  when: inventory_hostname != groups['master'][0]

@@ -1,0 +1,44 @@
+---
+# Onde está seu kubeconfig do cluster (control plane)
+longhorn_kubeconfig: /etc/kubernetes/admin.conf
+
+# Versão do chart/app (deixe vazio para pegar a mais recente estável do repo)
+longhorn_chart_version: ""      # ex.: "1.6.2"
+longhorn_namespace: longhorn-system
+
+# Ingress / UI
+longhorn_ingress_enabled: true
+longhorn_ingress_class: "nginx"
+longhorn_ingress_host: "longhorn.techaux.com.br"
+longhorn_ingress_path: "/"
+longhorn_ingress_annotations:
+  nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+  # Exemplos:
+  # nginx.ingress.kubernetes.io/auth-type: basic
+  # nginx.ingress.kubernetes.io/auth-secret: longhorn-basic-auth
+  # nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+
+# Ajustes padrão do Longhorn
+longhorn_default_replica_count: 3
+longhorn_default_data_path: "/var/lib/longhorn"
+longhorn_create_default_disk_labeled_nodes: false
+longhorn_default_replica_auto_balance: "best-effort"
+longhorn_storage_over_provisioning_pct: 200
+longhorn_storage_min_available_pct: 10
+longhorn_node_down_pod_deletion_policy: "delete-both-statefulset-and-deployment-pod"
+longhorn_orphan_auto_deletion: true
+longhorn_default_data_locality: "best-effort"
+
+# CSI / kubelet dir
+longhorn_csi_kubelet_root_dir: "/var/lib/kubelet"
+
+# Pacotes necessários nos nós
+longhorn_required_packages:
+  - open-iscsi
+  - nfs-common
+
+# Serviço iSCSI
+longhorn_iscsid_service: "iscsid"
+
+# Nome do grupo do master no seu inventário
+longhorn_master_group: "master"     # ajuste se o seu grupo for outro (ex.: controlplane)

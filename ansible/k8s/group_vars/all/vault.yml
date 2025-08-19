@@ -1,8 +1,0 @@
----
-domain_safe_mode_password: Techaux@2016
-domain_admin_password: Techaux@2016
-ansible_user: Administrator
-ansible_password: Techaux2016
-
-ad_passwords:
-  techaux: "Techaux2016"

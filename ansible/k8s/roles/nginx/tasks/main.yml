@@ -1,0 +1,90 @@
+---
+# === 0) Resolver o host de controle (UMA VEZ) ================================
+- name: Build control-host candidate list (run once)
+  ansible.builtin.set_fact:
+    nginx_ingress_cp_candidates: >-
+      {{
+        (
+          ([] if (nginx_ingress_control_host | default('') | length == 0) else [nginx_ingress_control_host])
+          + (groups[nginx_ingress_master_group] | default([]))
+          + (groups['controlplane']             | default([]))
+          + (groups['master']                   | default([]))
+          + (ansible_play_hosts_all             | default([]))
+        )
+      }}
+  run_once: true
+
+- name: Pick control host from candidates (run once)
+  ansible.builtin.set_fact:
+    nginx_ingress_cp_host: "{{ (nginx_ingress_cp_candidates | select() | list | first) | default(inventory_hostname) }}"
+    cacheable: true
+  run_once: true
+
+# === 1) Garantir Helm no host de controle ====================================
+- import_tasks: prereqs_helm.yml
+
+# === 2) Helm repo + namespace + values =======================================
+- name: Add ingress-nginx Helm repo
+  kubernetes.core.helm_repository:
+    name: "{{ nginx_ingress_repo_name }}"
+    repo_url: "{{ nginx_ingress_repo_url }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
+
+- name: Helm repo update
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
+
+- name: Ensure namespace exists
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ nginx_ingress_kubeconfig }}
+    get ns {{ nginx_ingress_namespace }}
+  register: _ns_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
+
+- name: Create namespace if missing
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ nginx_ingress_kubeconfig }}
+    create ns {{ nginx_ingress_namespace }}
+  when: _ns_check.rc != 0
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
+
+- name: Template ingress-nginx values
+  ansible.builtin.template:
+    src: ingress-nginx-values.yaml.j2
+    dest: /tmp/ingress-nginx-values.yaml
+    mode: "0644"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
+
+# === 3) Instalar/atualizar o chart ===========================================
+- name: Install/Upgrade ingress-nginx via Helm
+  kubernetes.core.helm:
+    name: "{{ nginx_ingress_release_name }}"
+    chart_ref: "{{ nginx_ingress_repo_name }}/ingress-nginx"
+    chart_version: "{{ (nginx_ingress_chart_version | trim) if (nginx_ingress_chart_version | trim | length > 0) else omit }}"
+    release_namespace: "{{ nginx_ingress_namespace }}"
+    create_namespace: true
+    values_files:
+      - /tmp/ingress-nginx-values.yaml
+    kubeconfig: "{{ nginx_ingress_kubeconfig }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
+
+# === 4) Espera básica do controller ==========================================
+- name: Wait for ingress-nginx controller rollout
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ nginx_ingress_kubeconfig }}
+    -n {{ nginx_ingress_namespace }} rollout status
+    deploy/{{ nginx_ingress_release_name }}-controller --timeout=180s
+  register: _rollout
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"

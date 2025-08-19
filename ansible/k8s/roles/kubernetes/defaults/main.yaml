@@ -1,1 +1,4 @@
 ---
+kube_version: "1.29.15-1.1"
+kube_major_minor: "{{ (kube_version | regex_search('^([0-9]+\\.[0-9]+)')) | default('1.29.15-1.1') }}"
+k8s_repo_channel: "v{{ kube_major_minor }}"

@@ -1,0 +1,52 @@
+# {{ ansible_managed | default('Ansible managed') }}
+# /etc/hosts para cluster Kubernetes
+
+127.0.0.1   localhost
+::1         localhost ip6-localhost ip6-loopback
+ff02::1     ip6-allnodes
+ff02::2     ip6-allrouters
+
+# hostname local (Ubuntu costuma ter 127.0.1.1)
+127.0.1.1   {{ inventory_hostname }}
+
+# Entradas do cluster (somente IPs da bridge {{ os_bridge_prefix }}.x)
+{% set pref = (os_bridge_prefix | default('192.168.100')) ~ '.' %}
+
+{# Coleta de nós: tenta controlplane/workers, depois master/worker, por fim all #}
+{% set cg = [] %}
+{% if groups is defined %}
+  {% set _ = cg.extend(groups.get('controlplane', [])) %}
+  {% set _ = cg.extend(groups.get('workers', [])) %}
+  {% set _ = cg.extend(groups.get('master', [])) %}
+  {% set _ = cg.extend(groups.get('worker', [])) %}
+  {% if cg|length == 0 %}
+    {% set _ = cg.extend(groups.get('all', [])) %}
+  {% endif %}
+{% endif %}
+
+{% for h in cg | unique | sort %}
+  {# 1) node_ip (passado pelo Vagrant) #}
+  {% set ip = hostvars[h].node_ip | default('') %}
+
+  {# 2) os_node_ip_final (calculado na role) #}
+  {% if not ip or not ip.startswith(pref) %}
+    {% set ip = hostvars[h].os_node_ip_final | default('') %}
+  {% endif %}
+
+  {# 3) facts, se existirem (ok mesmo com gather_facts: false) #}
+  {% if (not ip or not ip.startswith(pref)) and (hostvars[h].ansible_all_ipv4_addresses is defined) %}
+    {% for a in hostvars[h].ansible_all_ipv4_addresses %}
+      {% if a.startswith(pref) %}{% set ip = a %}{% break %}{% endif %}
+    {% endfor %}
+  {% endif %}
+  {% if (not ip or not ip.startswith(pref)) and (hostvars[h].ansible_default_ipv4 is defined) %}
+    {% if hostvars[h].ansible_default_ipv4.address is defined and hostvars[h].ansible_default_ipv4.address.startswith(pref) %}
+      {% set ip = hostvars[h].ansible_default_ipv4.address %}
+    {% endif %}
+  {% endif %}
+
+  {# Só escreve se for 192.168.100.* #}
+  {% if ip and ip.startswith(pref) %}
+{{ '%-15s'|format(ip) }} {{ h }}
+  {% endif %}
+{% endfor %}

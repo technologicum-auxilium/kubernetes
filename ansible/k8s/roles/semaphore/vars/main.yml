@@ -1,0 +1,10 @@
+---
+semaphore_master_group: "master"
+semaphore_control_host: ""
+semaphore_kubeconfig: "/etc/kubernetes/admin.conf"
+semaphore_namespace: "semaphore"
+semaphore_release_name: "semaphore"
+semaphore_chart_version: ""
+semaphore_repo_name: "semaphoreui"
+semaphore_repo_url: "https://semaphoreui.github.io/charts"
+semaphore_rollout_timeout: "180s"

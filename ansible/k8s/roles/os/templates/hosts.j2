@@ -1,0 +1,32 @@
+# {{ ansible_managed | default('Managed by Ansible') }}
+# /etc/hosts para cluster Kubernetes
+
+127.0.0.1   localhost
+::1         localhost ip6-localhost ip6-loopback
+ff02::1     ip6-allnodes
+ff02::2     ip6-allrouters
+
+{% if ansible_domain is defined and ansible_domain %}
+127.0.1.1   {{ inventory_hostname }}.{{ ansible_domain }} {{ inventory_hostname }}
+{% else %}
+127.0.1.1   {{ inventory_hostname }}
+{% endif %}
+
+{% set entries = os_hosts_entries | default([]) %}
+{% if not entries and groups is defined and hostvars is defined %}
+  {% set _nodes = (groups.get('controlplane', []) + groups.get('workers', [])) | unique %}
+  {% for h in _nodes if h in hostvars %}
+    {% set ip = (hostvars[h].node_ip
+                 | default(hostvars[h].os_node_ip_final
+                 | default(hostvars[h].ansible_host
+                 | default('')))) %}
+    {% if ip %}{{ '%-15s'|format(ip) }} {{ h }}{% endif %}
+  {% endfor %}
+{% else %}
+  {% for item in entries %}
+{{ '%-15s'|format(item.resolved_ip
+                  | default(item.ip
+                  | default(item.node_ip
+                  | default(item.os_node_ip_final)))) }} {{ item.name }}{% if item.fqdn is defined and item.fqdn %} {{ item.fqdn }}{% endif %}
+  {% endfor %}
+{% endif %}

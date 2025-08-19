@@ -1,0 +1,89 @@
+---
+# === 0) Resolver o host de controle (UMA VEZ) ===
+- name: Build control-host candidate list (run once)
+  ansible.builtin.set_fact:
+    prom_cp_candidates: >-
+      {{
+        (
+          ([] if (prom_control_host | default('') | length == 0) else [prom_control_host])
+          + (groups[prom_master_group] | default([]))
+          + (groups['controlplane']    | default([]))
+          + (groups['master']          | default([]))
+          + (ansible_play_hosts_all    | default([]))
+        )
+      }}
+  run_once: true
+
+- name: Pick control host from candidates (run once)
+  ansible.builtin.set_fact:
+    prom_cp_host: "{{ (prom_cp_candidates | select() | list | first) | default(inventory_hostname) }}"
+    cacheable: true
+  run_once: true
+
+# === 1) Garantir Helm ===
+- import_tasks: prereqs_helm.yml
+
+# === 2) Repo + namespace + values ===
+- name: Add Prometheus Helm repo
+  kubernetes.core.helm_repository:
+    name: "{{ prom_repo_name }}"
+    repo_url: "{{ prom_repo_url }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].prom_cp_host }}"
+
+- name: Helm repo update
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].prom_cp_host }}"
+
+- name: Ensure namespace exists
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ prom_kubeconfig }}
+    get ns {{ prom_namespace }}
+  register: _ns_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].prom_cp_host }}"
+
+- name: Create namespace if missing
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ prom_kubeconfig }}
+    create ns {{ prom_namespace }}
+  when: _ns_check.rc != 0
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].prom_cp_host }}"
+
+- name: Template kube-prometheus-stack values (seu values.yaml)
+  ansible.builtin.template:
+    src: kube-prometheus-values.yaml.j2
+    dest: /tmp/kube-prometheus-values.yaml
+    mode: "0644"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].prom_cp_host }}"
+
+# === 3) Instalar/atualizar o chart ===
+- name: Install/Upgrade kube-prometheus-stack via Helm
+  kubernetes.core.helm:
+    name: "{{ prom_release_name }}"
+    chart_ref: "{{ prom_repo_name }}/kube-prometheus-stack"
+    chart_version: "{{ (prom_chart_version | trim) if (prom_chart_version | trim | length > 0) else omit }}"
+    release_namespace: "{{ prom_namespace }}"
+    create_namespace: true
+    values_files:
+      - /tmp/kube-prometheus-values.yaml
+    kubeconfig: "{{ prom_kubeconfig }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].prom_cp_host }}"
+
+# === 4) Espera básica do operator ===
+- name: Wait for Prometheus Operator rollout
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ prom_kubeconfig }}
+    -n {{ prom_namespace }} rollout status
+    deploy/{{ prom_release_name }}-operator --timeout=300s
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].prom_cp_host }}"
