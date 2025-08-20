@@ -1,1 +1,36 @@
 ---
+galaxy_info:
+  role_name: kubernetes
+  author: "Kleyton Santos | Orcrist"
+  description: "Ansible role to bootstrap and configure a Kubernetes cluster on Ubuntu."
+  company: "Technologicum Auxilium (techaux)"
+  license: "MIT"
+  license_file: "LICENSE"
+  min_ansible_version: "2.12"
+
+  maintainers:
+    - name: "Kleyton Santos"
+      email: "kleyton@techaux.com.br"
+      github: "kleytonhsantos"
+
+  project_url: "https://github.com/technologicum-auxilium/ansible-role-kubernetes"
+  issue_tracker_url: "https://github.com/technologicum-auxilium/ansible-role-kubernetes/issues"
+  documentation_url: "https://techaux.com.br/docs/ansible-role-kubernetes"
+  homepage: "https://techaux.com.br"
+
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - focal
+
+  galaxy_tags:
+    - kubernetes
+    - k8s
+    - cluster
+    - bootstrap
+
+dependencies:
+collections:
+  - kubernetes.core
+  - community.general

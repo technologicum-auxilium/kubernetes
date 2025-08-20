@@ -1,0 +1,148 @@
+---
+- name: Build control-host candidate list (run once)
+  ansible.builtin.set_fact:
+    cloudflared_cp_candidates: >-
+      {{
+        (
+          ([] if (cloudflared_control_host | default('') | length == 0) else [cloudflared_control_host])
+          + (groups[cloudflared_master_group] | default([]))
+          + (groups['controlplane']           | default([]))
+          + (groups['master']                 | default([]))
+          + (ansible_play_hosts_all           | default([]))
+        )
+      }}
+  run_once: true
+
+- name: Pick control host from candidates (run once)
+  ansible.builtin.set_fact:
+    cloudflared_cp_host: "{{ (cloudflared_cp_candidates | select() | list | first) | default(inventory_hostname) }}"
+    cacheable: true
+  run_once: true
+
+- name: Ensure APT prerequisites
+  when: cloudflared_install_method == "apt"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+    state: present
+    update_cache: true
+
+- name: Add Cloudflare APT GPG key
+  when: cloudflared_install_method == "apt"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.get_url:
+    url: "{{ cloudflared_apt_key_url }}"
+    dest: /usr/share/keyrings/cloudflare.gpg
+    mode: "0644"
+
+- name: Add Cloudflare APT repo
+  when: cloudflared_install_method == "apt"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/cloudflared.list
+    content: "{{ cloudflared_apt_repo }}\n"
+    mode: "0644"
+
+- name: Install cloudflared
+  when: cloudflared_install_method == "apt"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+
+- name: Ensure {{ cloudflared_etc_dir }} exists
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.file:
+    path: "{{ cloudflared_etc_dir }}"
+    state: directory
+    owner: "{{ cloudflared_user }}"
+    group: "{{ cloudflared_group }}"
+    mode: "0755"
+
+- name: Install service with token (Zero Trust)
+  when: cloudflared_mode == "token"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.command: >
+    cloudflared service install {{ cloudflared_token }}
+  args:
+    creates: /etc/systemd/system/{{ cloudflared_service_name }}.service
+  notify: restart cloudflared
+
+- name: Fail if managed mode but variables missing
+  ansible.builtin.fail:
+    msg: "For managed mode, set cloudflared_tunnel_id and cloudflared_tunnel_secret_b64"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  when: cloudflared_mode == "managed" and
+        (cloudflared_tunnel_id | length == 0 or cloudflared_tunnel_secret_b64 | length == 0)
+
+- name: Write tunnel credentials (managed)
+  when: cloudflared_mode == "managed"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.template:
+    src: tunnel-credentials.json.j2
+    dest: "{{ cloudflared_etc_dir }}/{{ cloudflared_tunnel_id }}.json"
+    owner: "{{ cloudflared_user }}"
+    group: "{{ cloudflared_group }}"
+    mode: "0600"
+
+- name: Write config.yml (managed)
+  when: cloudflared_mode == "managed"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.template:
+    src: config.yml.j2
+    dest: "{{ cloudflared_etc_dir }}/config.yml"
+    owner: "{{ cloudflared_user }}"
+    group: "{{ cloudflared_group }}"
+    mode: "0644"
+  notify: restart cloudflared
+
+- name: Install systemd service (managed)
+  when: cloudflared_mode == "managed"
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/{{ cloudflared_service_name }}.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=cloudflared tunnel
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      User={{ cloudflared_user }}
+      Group={{ cloudflared_group }}
+      ExecStart=/usr/bin/cloudflared tunnel run --config {{ cloudflared_etc_dir }}/config.yml
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart cloudflared
+
+- name: Enable and start cloudflared
+  become: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.service:
+    name: "{{ cloudflared_service_name }}"
+    state: started
+    enabled: true
+
+- name: Show cloudflared version
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].cloudflared_cp_host }}"
+  ansible.builtin.command: cloudflared --version
+  changed_when: false
+  failed_when: false

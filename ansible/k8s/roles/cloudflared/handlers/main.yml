@@ -1,0 +1,6 @@
+---
+- name: restart cloudflared
+  ansible.builtin.service:
+    name: "{{ cloudflared_service_name }}"
+    state: restarted
+    enabled: true

@@ -1,5 +1,39 @@
 ---
-# Carregar módulos no boot
+- name: Stat /tmp/.ansible
+  become: true
+  ansible.builtin.stat:
+    path: /tmp/.ansible
+  register: st_ansible
+
+- name: Ensure /tmp has correct mode
+  become: true
+  ansible.builtin.file:
+    path: /tmp
+    state: directory
+    mode: '1777'
+
+- name: Ensure /tmp/.ansible is a directory
+  become: true
+  ansible.builtin.file:
+    path: /tmp/.ansible
+    state: directory
+    mode: '1777'
+    owner: root
+    group: root
+
+- name: Ensure /tmp/.ansible/tmp exists
+  become: true
+  ansible.builtin.file:
+    path: /tmp/.ansible/tmp
+    state: directory
+    mode: '1777'
+    owner: root
+    group: root
+
+- name: Set remote tmp just for this run
+  set_fact:
+    ansible_remote_tmp: "/tmp/.ansible/tmp"
+
 - name: Deploy modules file for Kubernetes (inline)
   become: true
   ansible.builtin.copy:
@@ -15,43 +49,57 @@
       # ip_vs_sh
       # nf_conntrack
 
-# Carregar agora (sem reboot)
 - name: Load required kernel modules now
+  become: true
   ansible.builtin.modprobe:
     name: "{{ item }}"
     state: present
-  loop: "{{ os_load_kernel_modules }}"
-  become: true
+  loop: "{{ os_load_kernel_modules | default(['overlay','br_netfilter']) }}"
 
 - name: Try loading optional kernel modules
+  become: true
   ansible.builtin.modprobe:
     name: "{{ item }}"
     state: present
-  loop: "{{ os_optional_kernel_modules }}"
+  loop: "{{ os_optional_kernel_modules | default([]) }}"
   ignore_errors: true
-  become: true
 
-# Backend do iptables (opcional)
+- name: Ensure k8s sysctl params are present
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes-cri.conf
+    mode: '0644'
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+
+- name: Apply sysctl params
+  become: true
+  ansible.builtin.command: sysctl --system
+  register: sysctl_apply
+  changed_when: "'Applying /etc/sysctl.d/99-kubernetes-cri.conf' in sysctl_apply.stdout"
+
 - name: Switch iptables backend to legacy
+  become: true
   ansible.builtin.command: "update-alternatives --set {{ item.bin }} {{ item.legacy }}"
   loop:
     - { bin: 'iptables',   legacy: '/usr/sbin/iptables-legacy'   }
     - { bin: 'ip6tables',  legacy: '/usr/sbin/ip6tables-legacy'  }
     - { bin: 'arptables',  legacy: '/usr/sbin/arptables-legacy'  }
     - { bin: 'ebtables',   legacy: '/usr/sbin/ebtables-legacy'   }
-  when: os_set_iptables_backend == 'legacy'
+  when: os_set_iptables_backend | default('') == 'legacy'
   changed_when: true
   failed_when: false
-  become: true
 
 - name: Switch iptables backend to nft
+  become: true
   ansible.builtin.command: "update-alternatives --set {{ item.bin }} {{ item.nft }}"
   loop:
     - { bin: 'iptables',   nft: '/usr/sbin/iptables-nft'   }
     - { bin: 'ip6tables',  nft: '/usr/sbin/ip6tables-nft'  }
     - { bin: 'arptables',  nft: '/usr/sbin/arptables-nft'  }
     - { bin: 'ebtables',   nft: '/usr/sbin/ebtables-nft'   }
-  when: os_set_iptables_backend == 'nft'
+  when: os_set_iptables_backend | default('') == 'nft'
   changed_when: true
   failed_when: false
-  become: true

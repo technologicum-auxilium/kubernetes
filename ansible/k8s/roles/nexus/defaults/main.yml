@@ -1,0 +1,31 @@
+---
+# Nexus defaults
+
+nexus_control_host: ""
+nexus_master_group: "master"
+
+nexus_namespace: "nexus"
+nexus_release_name: "nexus"
+nexus_chart_repo: "https://sonatype.github.io/helm3-charts"
+nexus_chart_name: "nexus-repository-manager"
+
+# Valores customizados para o Nexus
+nexus_values:
+  nexus:
+    imageName: sonatype/nexus3
+    imageTag: 3.71.0
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 1
+      limits:
+        memory: 4Gi
+        cpu: 2
+    persistence:
+      enabled: true
+      storageClass: "longhorn"   # Ajuste se estiver usando outro StorageClass
+      accessMode: ReadWriteOnce
+      size: 20Gi
+    service:
+      type: LoadBalancer
+      port: 8081

@@ -1,5 +1,4 @@
 ---
-# Resolve o host de controle com fallback robusto (evita delegate_to vazio)
 - name: Resolve control-plane host for Helm operations
   ansible.builtin.set_fact:
     longhorn_cp_host: >-
@@ -9,13 +8,10 @@
          default( (groups['master']             | default([])) | first, true ) |
          default( (ansible_play_hosts_all       | default([])) | first, true ) }}
 
-# 0) Pré-requisitos (Longhorn data plane em todos os nós)
 - import_tasks: node_prereqs.yml
 
-# 1) Garantir helm no host de controle
 - import_tasks: prereqs_helm.yml
 
-# 2) Helm repo do Longhorn
 - name: Add Longhorn Helm repo
   kubernetes.core.helm_repository:
     name: longhorn
@@ -29,25 +25,6 @@
   run_once: true
   delegate_to: "{{ longhorn_cp_host }}"
 
-# 3) Namespace + values
-- name: Ensure namespace exists
-  ansible.builtin.command: >
-    kubectl --kubeconfig={{ longhorn_kubeconfig }}
-    get ns {{ longhorn_namespace }}
-  register: _ns_check
-  changed_when: false
-  failed_when: false
-  run_once: true
-  delegate_to: "{{ longhorn_cp_host }}"
-
-- name: Create namespace if missing
-  ansible.builtin.command: >
-    kubectl --kubeconfig={{ longhorn_kubeconfig }}
-    create ns {{ longhorn_namespace }}
-  when: _ns_check.rc != 0
-  run_once: true
-  delegate_to: "{{ longhorn_cp_host }}"
-
 - name: Template Longhorn values
   ansible.builtin.template:
     src: longhorn-values.yaml.j2
@@ -56,7 +33,6 @@
   run_once: true
   delegate_to: "{{ longhorn_cp_host }}"
 
-# 4) Instalar/atualizar o chart
 - name: Install/Upgrade Longhorn via Helm
   kubernetes.core.helm:
     name: longhorn
@@ -70,7 +46,6 @@
   run_once: true
   delegate_to: "{{ longhorn_cp_host }}"
 
-# 5) Espera básica da UI
 - name: Wait for Longhorn UI rollout
   ansible.builtin.command: >
     kubectl --kubeconfig={{ longhorn_kubeconfig }}

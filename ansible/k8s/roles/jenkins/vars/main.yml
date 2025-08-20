@@ -1,3 +1,48 @@
-#SPDX-License-Identifier: MIT-0
 ---
-# vars file for jenkins
+# Onde rodar Helm/kubectl
+jenkins_master_group: "master"           # grupo com o(s) control-plane(s)
+jenkins_control_host: ""                 # opcional: forçar (ex.: "master")
+jenkins_kubeconfig: "/etc/kubernetes/admin.conf"
+
+# Chart / release
+jenkins_namespace: "jenkins"
+jenkins_release_name: "jenkins"
+jenkins_chart_version: ""                # vazio = última estável
+jenkins_repo_name: "jenkinsci"
+jenkins_repo_url: "https://charts.jenkins.io"
+
+# Ingress (via ingress-nginx)
+jenkins_ingress_enabled: true
+jenkins_ingress_class: "nginx"
+jenkins_host: "jenkins.techaux.com.br"
+
+# Serviço (normalmente ClusterIP quando usa Ingress)
+jenkins_service_type: "ClusterIP"        # "ClusterIP" | "LoadBalancer" | "NodePort"
+
+# Persistência
+jenkins_storage_class: "longhorn"
+jenkins_storage_size: "20Gi"
+
+# Admin (por segurança, ideal usar secret externo / Ansible Vault em prod)
+jenkins_admin_user: "admin"
+jenkins_admin_password: "ChangeMe123!"
+
+# Recursos (leves para lab)
+jenkins_resources:
+  requests:
+    cpu: "200m"
+    memory: "1Gi"
+
+# Plugins extras (instalação inicial)
+jenkins_install_plugins:
+  - kubernetes:4307.v5795b_301a_2b_2
+  - workflow-aggregator:596.v8c21c963d92d
+  - git:5.2.1
+  - configuration-as-code:1815.v44e9a_84a_2d52
+  - blueocean:1.27.10
+  - matrix-auth:3.2.1
+  - credentials-binding:687.v619bb_7b_5b_44b_
+
+# NodePort (se optar por service_type: NodePort)
+jenkins_nodeport_http: 0   # 0 = auto
+jenkins_nodeport_agent: 0

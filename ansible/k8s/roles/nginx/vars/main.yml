@@ -10,7 +10,7 @@ nginx_ingress_repo_name: "ingress-nginx"
 nginx_ingress_repo_url: "https://kubernetes.github.io/ingress-nginx"
 
 nginx_ingress_service_type: "LoadBalancer"
-nginx_ingress_loadbalancer_ip: "192.168.100.100"
+nginx_ingress_loadbalancer_ip: "192.168.100.109"
 nginx_ingress_node_ports:
   http: 0
   https: 0

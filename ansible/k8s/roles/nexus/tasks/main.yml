@@ -1,0 +1,55 @@
+---
+- name: Pick Nexus control-plane host
+  ansible.builtin.set_fact:
+    nexus_cp_host: >-
+      {{
+        (nexus_control_host | default('')) 
+        or (groups[nexus_master_group | default('master')] | default([]) | first)
+        or (groups['controlplane'] | default([]) | first)
+        or (groups['master'] | default([]) | first)
+        or (ansible_play_hosts_all | first)
+      }}
+    cacheable: true
+  run_once: true
+
+- name: Add Sonatype Helm repo
+  kubernetes.core.helm_repository:
+    name: sonatype
+    repo_url: "{{ nexus_chart_repo }}"
+  run_once: true
+  delegate_to: "{{ nexus_cp_host }}"
+
+- name: Helm repo update
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ nexus_cp_host }}"
+
+- name: Template Nexus values
+  ansible.builtin.template:
+    src: nexus-values.yaml.j2
+    dest: /tmp/nexus-values.yaml
+    mode: "0644"
+  run_once: true
+  delegate_to: "{{ nexus_cp_host }}"
+
+- name: Install/Upgrade Nexus via Helm
+  kubernetes.core.helm:
+    name: "{{ nexus_release_name }}"
+    chart_ref: "sonatype/{{ nexus_chart_name }}"
+    release_namespace: "{{ nexus_namespace }}"
+    create_namespace: true
+    values_files:
+      - /tmp/nexus-values.yaml
+    kubeconfig: /etc/kubernetes/admin.conf
+  run_once: true
+  delegate_to: "{{ nexus_cp_host }}"
+
+- name: Wait for Nexus rollout
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf
+    -n {{ nexus_namespace }} rollout status deploy/{{ nexus_release_name }} --timeout=600s
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ nexus_cp_host }}"

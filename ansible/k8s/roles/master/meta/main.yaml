@@ -1,1 +1,37 @@
 ---
+galaxy_info:
+  role_name: master
+  author: "Kleyton Santos | Orcrist"
+  description: "Ansible role to configure Kubernetes control plane (master) nodes on Ubuntu."
+  company: "Technologicum Auxilium (techaux)"
+  license: "MIT"
+  license_file: "LICENSE"
+  min_ansible_version: "2.12"
+
+  maintainers:
+    - name: "Kleyton Santos"
+      email: "kleyton@techaux.com.br"
+      github: "kleytonhsantos"
+
+  project_url: "https://github.com/technologicum-auxilium/ansible-role-master"
+  issue_tracker_url: "https://github.com/technologicum-auxilium/ansible-role-master/issues"
+  documentation_url: "https://techaux.com.br/docs/ansible-role-master"
+  homepage: "https://techaux.com.br"
+
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - focal
+
+  galaxy_tags:
+    - kubernetes
+    - control-plane
+    - api-server
+    - kubeadm
+
+dependencies: []
+
+collections:
+  - kubernetes.core
+  - community.general

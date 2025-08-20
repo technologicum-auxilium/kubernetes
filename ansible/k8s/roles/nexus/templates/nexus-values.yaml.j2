@@ -1,0 +1,21 @@
+nexus:
+  imageName: {{ nexus_values.nexus.imageName }}
+  imageTag: {{ nexus_values.nexus.imageTag }}
+
+  resources:
+    requests:
+      memory: {{ nexus_values.nexus.resources.requests.memory }}
+      cpu: {{ nexus_values.nexus.resources.requests.cpu }}
+    limits:
+      memory: {{ nexus_values.nexus.resources.limits.memory }}
+      cpu: {{ nexus_values.nexus.resources.limits.cpu }}
+
+  persistence:
+    enabled: {{ nexus_values.nexus.persistence.enabled | lower }}
+    storageClass: {{ nexus_values.nexus.persistence.storageClass }}
+    accessMode: {{ nexus_values.nexus.persistence.accessMode }}
+    size: {{ nexus_values.nexus.persistence.size }}
+
+  service:
+    type: {{ nexus_values.nexus.service.type }}
+    port: {{ nexus_values.nexus.service.port }}

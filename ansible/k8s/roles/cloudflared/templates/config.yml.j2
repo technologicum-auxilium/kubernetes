@@ -1,0 +1,19 @@
+# /etc/cloudflared/config.yml
+# Gerado por Ansible
+
+tunnel: {{ cloudflared_tunnel_id }}
+credentials-file: {{ cloudflared_etc_dir }}/{{ cloudflared_tunnel_id }}.json
+
+# Opcional: logs
+loglevel: info
+
+# Ingress rules
+ingress:
+{% for rule in cloudflared_ingress %}
+  - {% if rule.hostname is defined %}hostname: {{ rule.hostname }}
+    {% endif %}service: {{ rule.service }}
+    {% if cloudflared_no_tls_verify or (rule.no_tls_verify | default(false)) %}
+    originRequest:
+      noTLSVerify: true
+    {% endif %}
+{% endfor %}

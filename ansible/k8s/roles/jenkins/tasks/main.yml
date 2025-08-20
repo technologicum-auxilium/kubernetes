@@ -1,3 +1,89 @@
-#SPDX-License-Identifier: MIT-0
 ---
-# tasks file for jenkins
+# === 0) Resolver o host de controle (UMA VEZ) =================================
+- name: Build control-host candidate list (run once)
+  ansible.builtin.set_fact:
+    jenkins_cp_candidates: >-
+      {{
+        (
+          ([] if (jenkins_control_host | default('') | length == 0) else [jenkins_control_host])
+          + (groups[jenkins_master_group] | default([]))
+          + (groups['controlplane']       | default([]))
+          + (groups['master']             | default([]))
+          + (ansible_play_hosts_all       | default([]))
+        )
+      }}
+  run_once: true
+
+- name: Pick control host from candidates (run once)
+  ansible.builtin.set_fact:
+    jenkins_cp_host: "{{ (jenkins_cp_candidates | select() | list | first) | default(inventory_hostname) }}"
+    cacheable: true
+  run_once: true
+
+# === 1) Garantir Helm no host de controle ====================================
+- import_tasks: prereqs_helm.yml
+
+# === 2) Helm repo + namespace + values =======================================
+- name: Add Jenkins Helm repo
+  kubernetes.core.helm_repository:
+    name: "{{ jenkins_repo_name }}"
+    repo_url: "{{ jenkins_repo_url }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].jenkins_cp_host }}"
+
+- name: Helm repo update
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].jenkins_cp_host }}"
+
+- name: Ensure namespace exists
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ jenkins_kubeconfig }}
+    get ns {{ jenkins_namespace }}
+  register: _ns_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].jenkins_cp_host }}"
+
+- name: Create namespace if missing
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ jenkins_kubeconfig }}
+    create ns {{ jenkins_namespace }}
+  when: _ns_check.rc != 0
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].jenkins_cp_host }}"
+
+- name: Template Jenkins values
+  ansible.builtin.template:
+    src: jenkins-values.yaml.j2
+    dest: /tmp/jenkins-values.yaml
+    mode: "0644"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].jenkins_cp_host }}"
+
+# === 3) Instalar/atualizar o chart ===========================================
+- name: Install/Upgrade Jenkins via Helm
+  kubernetes.core.helm:
+    name: "{{ jenkins_release_name }}"
+    chart_ref: "{{ jenkins_repo_name }}/jenkins"
+    chart_version: "{{ (jenkins_chart_version | trim) if (jenkins_chart_version | trim | length > 0) else omit }}"
+    release_namespace: "{{ jenkins_namespace }}"
+    create_namespace: true
+    values_files:
+      - /tmp/jenkins-values.yaml
+    kubeconfig: "{{ jenkins_kubeconfig }}"
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].jenkins_cp_host }}"
+
+# === 4) Espera básica do controller ==========================================
+- name: Wait for Jenkins rollout
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ jenkins_kubeconfig }}
+    -n {{ jenkins_namespace }} rollout status
+    statefulset/{{ jenkins_release_name }} --timeout=300s
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].jenkins_cp_host }}"

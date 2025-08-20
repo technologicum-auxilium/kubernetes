@@ -1,0 +1,58 @@
+controller:
+  image: jenkins/jenkins
+  tag: lts-jdk17
+  installPlugins:
+{% for p in jenkins_install_plugins %}
+    - "{{ p }}"
+{% endfor %}
+
+  adminUser: "{{ jenkins_admin_user }}"
+  adminPassword: "{{ jenkins_admin_password }}"
+
+  resources:
+    requests:
+      cpu: "{{ jenkins_resources.requests.cpu }}"
+      memory: "{{ jenkins_resources.requests.memory }}"
+
+  # Service para a UI/HTTP
+  serviceType: {{ jenkins_service_type }}
+{% if jenkins_service_type == 'NodePort' %}
+  nodePort:
+    http: {{ jenkins_nodeport_http | int }}
+    agent: {{ jenkins_nodeport_agent | int }}
+{% endif %}
+
+  # Ingress para expor a UI
+  ingress:
+    enabled: {{ jenkins_ingress_enabled | bool | lower }}
+    ingressClassName: "{{ jenkins_ingress_class }}"
+    hostName: "{{ jenkins_host }}"
+    # TLS opcional:
+    # tls:
+    #   - secretName: jenkins-tls
+    #     hosts:
+    #       - "{{ jenkins_host }}"
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+
+  # Configura o Jenkins para trabalhar com agentes Kubernetes se desejar
+  JCasC:
+    defaultConfig: true
+    configScripts:
+      kubernetes-cloud: |
+        jenkins:
+          clouds:
+          - kubernetes:
+              name: "kubernetes"
+              serverUrl: "https://kubernetes.default"
+              namespace: "{{ jenkins_namespace | default('jenkins') }}"
+              jenkinsUrl: "http://{{ jenkins_release_name }}.{{ jenkins_namespace | default('jenkins') }}.svc.cluster.local:8080"
+              containerCapStr: "10"
+              # Comentado por padrão; ajuste se quiser auto-builds em K8s
+              templates: []
+
+persistence:
+  enabled: true
+  storageClass: "{{ jenkins_storage_class }}"
+  size: "{{ jenkins_storage_size }}"

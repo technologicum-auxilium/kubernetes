@@ -7,7 +7,7 @@ controller:
 
   admin:
     username: admin
-    password: "techaux123"   # (recomendado trocar ou usar existingSecret)
+    password: "techaux123"
 
   serviceType: ClusterIP
 

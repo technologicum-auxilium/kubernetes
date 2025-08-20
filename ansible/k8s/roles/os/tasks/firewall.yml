@@ -6,5 +6,3 @@
     enabled: no
   when: os_disable_ufw
   become: true
-
-# Se quiser manter ufw, abra as portas manualmente depois (6443, VXLAN, BGP, etc.)

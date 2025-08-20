@@ -26,7 +26,7 @@ metallb_values:
 metallb_address_pools:
   - name: "default-pool"
     addresses:
-      - "192.168.100.100-192.168.100.110"
+      - "192.168.100.109-192.168.100.110"
 
 metallb_l2advertisements:
   - name: "default-l2adv"

@@ -1,0 +1,33 @@
+---
+cloudflared_install_method: "apt"
+cloudflared_master_group: "master"
+cloudflared_control_host: ""
+cloudflared_mode: "managed"
+cloudflared_user: "root"
+cloudflared_group: "root"
+cloudflared_etc_dir: "/etc/cloudflared"
+cloudflared_service_name: "cloudflared"
+cloudflared_token: ""
+cloudflared_tunnel_name: "k8s-tunnel"
+cloudflared_tunnel_id: ""
+cloudflared_tunnel_secret_b64: ""
+cloudflared_default_upstream: "http://192.168.100.100"
+cloudflared_no_tls_verify: false
+cloudflared_origin_request_headers: {}
+cloudflared_apt_repo: "deb [signed-by=/usr/share/keyrings/cloudflare.gpg] https://pkg.cloudflare.com/ cloudflared main"
+cloudflared_apt_key_url: "https://pkg.cloudflare.com/cloudflare-main.gpg"
+
+cloudflared_ingress:
+  - hostname: "grafana.techaux.com.br"
+    service: "{{ cloudflared_default_upstream }}"
+  - hostname: "prometheus.techaux.com.br"
+    service: "{{ cloudflared_default_upstream }}"
+  - hostname: "alertmanager.techaux.com.br"
+    service: "{{ cloudflared_default_upstream }}"
+  - hostname: "jenkins.techaux.com.br"
+    service: "{{ cloudflared_default_upstream }}"
+  - hostname: "semaphore.techaux.com.br"
+    service: "{{ cloudflared_default_upstream }}"
+  - hostname: "longhorn.techaux.com.br"
+    service: "{{ cloudflared_default_upstream }}"
+  - service: "http_status:404"
