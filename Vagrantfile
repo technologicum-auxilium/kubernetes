@@ -17,7 +17,7 @@ servers = [
     box:        UBUNTU_BOX,
     ip_bridge:  MASTER_BRIDGE_IP,
     playbook:   "ansible/k8s/master.yaml",
-    group:      "/Kubernetes/Master",
+    group:      "/Cluster/Kubernetes/Master",
     memory:     2048,
     cpus:       2
   }
@@ -29,7 +29,7 @@ servers = [
     box:        UBUNTU_BOX,
     ip_bridge:  "#{NET_BRIDGE_PREFIX}.#{10 + i}",
     playbook:   "ansible/k8s/worker.yaml",
-    group:      "/Kubernetes/Worker",
+    group:      "/Cluster/Kubernetes/Worker",
     memory:     4096,
     cpus:       2
   }
