@@ -9,8 +9,8 @@
     - containerd
     - kubernetes
     - master
-    - longhorn
-    - metallb
-    - nginx
-    - prometheus
-    - semaphore
+    #- longhorn
+    #- metallb
+    #- nginx
+    #- prometheus
+    #- semaphore
