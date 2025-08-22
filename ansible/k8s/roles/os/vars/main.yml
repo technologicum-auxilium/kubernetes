@@ -1,3 +1,2 @@
-#SPDX-License-Identifier: MIT-0
 ---
-# vars file for os
+os_set_iptables_backend: legacy

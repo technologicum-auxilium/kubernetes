@@ -23,7 +23,7 @@ nginx_ingress_controller_requests:
   memory: "128Mi"
 
 nginx_ingress_svc_annotations:
-  metallb.universe.tf/address-pool: "default-pool"
+  metallb.universe.tf/address-pool: "pool"
 
 nginx_ingress_tolerations: []
 nginx_ingress_affinity: {}

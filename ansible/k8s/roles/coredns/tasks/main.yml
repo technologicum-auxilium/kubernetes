@@ -1,0 +1,95 @@
+---
+- name: Ensure kube-system exists (no-op if present)
+  ansible.builtin.command: kubectl --kubeconfig {{ kubeconfig_path }} get ns {{ coredns_namespace }}
+  changed_when: false
+  failed_when: false
+
+- name: Get current CoreDNS ConfigMap
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: v1
+    kind: ConfigMap
+    name: coredns
+    namespace: "{{ coredns_namespace }}"
+  register: _cm_info
+
+- name: Create base CoreDNS ConfigMap if missing
+  when: _cm_info.resources | length == 0
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: coredns
+        namespace: "{{ coredns_namespace }}"
+      data:
+        Corefile: "{{ lookup('template', 'Corefile.base.j2') }}"
+
+- name: Read Corefile from current ConfigMap
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: v1
+    kind: ConfigMap
+    name: coredns
+    namespace: "{{ coredns_namespace }}"
+  register: _cm_info2
+
+- name: Set current Corefile fact
+  ansible.builtin.set_fact:
+    _corefile_current: "{{ _cm_info2.resources[0].data.Corefile }}"
+
+- name: Build desired forward line
+  vars:
+    _resolv_piece: "{{ '/etc/resolv.conf' if coredns_keep_resolvconf else '' }}"
+    _extra: "{{ (coredns_extra_upstreams | default([])) | join(' ') }}"
+  ansible.builtin.set_fact:
+    _forward_line: >-
+      forward . {{
+        (_resolv_piece ~ ' ' ~ _extra).strip()
+      }}
+
+- name: Compute patched Corefile
+  vars:
+    forward_regex: '^[ \t]*forward[ \t]+\.[^\n]*$'
+  ansible.builtin.set_fact:
+    _corefile_patched: >-
+      {{
+        (
+          _corefile_current is search(forward_regex, multiline=True)
+          | ternary(
+              _corefile_current | regex_replace(forward_regex, _forward_line, multiline=True),
+              _corefile_current | regex_replace('^([ \t]*cache[ \t]+\\d+.*)$', _forward_line ~ "\n\\1", multiline=True)
+            )
+        )
+      }}
+
+- name: Apply updated CoreDNS ConfigMap if changed
+  when: _corefile_patched != _corefile_current
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: coredns
+        namespace: "{{ coredns_namespace }}"
+      data:
+        Corefile: "{{ _corefile_patched }}"
+  register: _cm_applied
+
+- name: Restart CoreDNS
+  when: _cm_applied is defined and _cm_applied.changed
+  ansible.builtin.command: >
+    kubectl --kubeconfig {{ kubeconfig_path }}
+    -n {{ coredns_namespace }} rollout restart deploy/coredns
+
+- name: Wait CoreDNS rollout
+  when: _cm_applied is defined and _cm_applied.changed
+  ansible.builtin.command: >
+    kubectl --kubeconfig {{ kubeconfig_path }}
+    -n {{ coredns_namespace }}
+    rollout status deploy/coredns --timeout=120s
+  changed_when: false

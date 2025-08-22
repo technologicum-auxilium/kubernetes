@@ -1,0 +1,76 @@
+---
+- name: (Opcional) Remover flannel se existir e for solicitado
+  ansible.builtin.shell: |
+    set -e
+    if kubectl --kubeconfig {{ kubeconfig_path }} -n kube-system get ds/kube-flannel-ds >/dev/null 2>&1; then
+      kubectl --kubeconfig {{ kubeconfig_path }} -n kube-system delete ds kube-flannel-ds
+    fi
+  when: calico_remove_flannel | bool
+  changed_when: true
+
+# 1) Adicionar/atualizar o repo do Helm do Calico
+- name: Add Calico Helm repo
+  kubernetes.core.helm_repository:
+    name: "{{ calico_helm_repo_name }}"
+    repo_url: "{{ calico_helm_repo_url }}"
+
+- name: Helm repo update
+  ansible.builtin.command: helm repo update
+  changed_when: false
+
+# 2) Instalar/upgrade do tigera-operator (com CRDs)
+- name: Install/Upgrade tigera-operator chart
+  kubernetes.core.helm:
+    name: "{{ calico_release_name }}"
+    chart_ref: "{{ calico_helm_repo_name }}/{{ calico_chart_name }}"
+    chart_version: "{{ (calico_chart_version | trim) if (calico_chart_version | trim | length > 0) else omit }}"
+    release_namespace: "{{ calico_operator_namespace }}"
+    create_namespace: true
+    kubeconfig: "{{ kubeconfig_path }}"
+
+# 3) Esperar operator disponível
+- name: Wait tigera-operator deployment to be Available
+  ansible.builtin.command: >
+    kubectl --kubeconfig {{ kubeconfig_path }}
+    -n {{ calico_operator_namespace }}
+    wait deploy/tigera-operator --for=condition=Available=True --timeout=240s
+  changed_when: false
+
+# 4) Aplicar/atualizar o CR "Installation" (Calico)
+- name: Apply Calico Installation (CR)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: operator.tigera.io/v1
+      kind: Installation
+      metadata:
+        name: "{{ calico_installation_name }}"
+      spec:
+        cni:
+          type: "{{ calico_cni_type }}"
+        calicoNetwork:
+          bgp: "{{ calico_bgp }}"
+          ipPools:
+            - blockSize: 26
+              cidr: "{{ calico_pod_cidr }}"
+              encapsulation: "{{ calico_encapsulation }}"
+              natOutgoing: {{ calico_nat_outgoing | bool }}
+              nodeSelector: all()
+
+# 5) Aguardar componentes Calico prontos
+- name: Wait calico-node DaemonSet rollout
+  ansible.builtin.command: >
+    kubectl --kubeconfig {{ kubeconfig_path }}
+    -n calico-system
+    rollout status ds/calico-node --timeout=600s
+  changed_when: false
+  failed_when: false
+
+- name: Wait calico-kube-controllers deployment rollout
+  ansible.builtin.command: >
+    kubectl --kubeconfig {{ kubeconfig_path }}
+    -n calico-system
+    rollout status deploy/calico-kube-controllers --timeout=600s
+  changed_when: false
+  failed_when: false

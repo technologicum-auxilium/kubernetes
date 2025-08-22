@@ -1,5 +1,4 @@
 ---
-# === 0) Resolver o host de controle (UMA VEZ) ================================
 - name: Build control-host candidate list (run once)
   ansible.builtin.set_fact:
     nginx_ingress_cp_candidates: >-
@@ -20,10 +19,8 @@
     cacheable: true
   run_once: true
 
-# === 1) Garantir Helm no host de controle ====================================
 - import_tasks: prereqs_helm.yml
 
-# === 2) Helm repo + namespace + values =======================================
 - name: Add ingress-nginx Helm repo
   kubernetes.core.helm_repository:
     name: "{{ nginx_ingress_repo_name }}"
@@ -63,7 +60,6 @@
   run_once: true
   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
 
-# === 3) Instalar/atualizar o chart ===========================================
 - name: Install/Upgrade ingress-nginx via Helm
   kubernetes.core.helm:
     name: "{{ nginx_ingress_release_name }}"
@@ -77,7 +73,6 @@
   run_once: true
   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].nginx_ingress_cp_host }}"
 
-# === 4) Espera básica do controller ==========================================
 - name: Wait for ingress-nginx controller rollout
   ansible.builtin.command: >
     kubectl --kubeconfig={{ nginx_ingress_kubeconfig }}

@@ -7,7 +7,7 @@ num_workers = 3
 BRIDGE_IFACE = "Realtek PCIe GbE Family Controller"
 
 NET_BRIDGE_PREFIX = "192.168.100"
-MASTER_BRIDGE_IP  = "#{NET_BRIDGE_PREFIX}.10"
+MASTER_BRIDGE_IP  = "#{NET_BRIDGE_PREFIX}.0"
 
 UBUNTU_BOX = "ubuntu/jammy64"
 
@@ -38,8 +38,9 @@ end
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   servers.each do |server|
     config.vm.define server[:name] do |cfg|
-      cfg.vm.box      = server[:box]
-      cfg.vm.hostname = server[:name]
+      cfg.vm.box             = server[:box]
+      cfg.vm.hostname        = server[:name]
+      config.vm.boot_timeout = 600
 
       cfg.vm.network "public_network",
         ip: server[:ip_bridge],

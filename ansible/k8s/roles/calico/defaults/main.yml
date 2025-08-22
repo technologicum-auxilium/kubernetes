@@ -1,0 +1,23 @@
+# kubeconfig
+kubeconfig_path: /etc/kubernetes/admin.conf
+
+# Helm repo/chart (oficial Project Calico)
+calico_helm_repo_name: projectcalico
+calico_helm_repo_url: https://docs.tigera.io/calico/charts
+calico_chart_name: tigera-operator
+calico_chart_version: ""   # vazio = pegar a última estável
+
+# Namespace do operator
+calico_operator_namespace: tigera-operator
+calico_release_name: calico
+
+# Especificação do Calico (CR Installation)
+calico_installation_name: default
+calico_cni_type: Calico            # não mude
+calico_pod_cidr: "10.244.0.0/16"   # ajuste para o seu cluster
+calico_encapsulation: VXLAN         # VXLAN (recomendado em lab) | IPIP | None
+calico_nat_outgoing: true
+calico_bgp: Disabled                # Enabled/Disabled
+
+# Opcional: deletar CNI conflituoso (ex. flannel) antes de instalar
+calico_remove_flannel: false

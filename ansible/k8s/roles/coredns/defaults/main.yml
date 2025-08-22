@@ -1,0 +1,16 @@
+---
+coredns_namespace: kube-system
+coredns_deployment: coredns
+kubeconfig_path: /etc/kubernetes/admin.conf
+
+coredns_keep_resolvconf: false
+
+coredns_extra_upstreams:
+  - 1.1.1.1
+  - 1.0.0.1
+  - 8.8.8.8
+  - 8.8.4.4
+
+coredns_cluster_domain: cluster.local
+coredns_metrics_port: 9153
+coredns_cache_ttl: 30

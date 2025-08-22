@@ -1,6 +1,4 @@
 ---
-# roles/master/tasks/main.yml
-
 - name: Ensure kubelet uses bridged IP
   become: true
   ansible.builtin.lineinfile:

@@ -4,4 +4,6 @@ config_file:
   - cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
   - chown vagrant:vagrant /home/vagrant/.kube/config
 
+cluster_name: techaux-prd
+
 user: vagrant

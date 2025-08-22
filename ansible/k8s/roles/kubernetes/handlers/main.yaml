@@ -3,4 +3,3 @@
   ansible.builtin.systemd:
     name: kubelet
     state: restarted
-    daemon_reload: yes

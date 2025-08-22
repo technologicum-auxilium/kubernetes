@@ -1,0 +1,16 @@
+.:53 {
+    errors
+    health
+    ready
+    kubernetes {{ coredns_cluster_domain }} in-addr.arpa ip6.arpa {
+        pods insecure
+        fallthrough in-addr.arpa ip6.arpa
+        ttl {{ coredns_cache_ttl }}
+    }
+    prometheus :{{ coredns_metrics_port }}
+    forward . /etc/resolv.conf
+    cache {{ coredns_cache_ttl }}
+    loop
+    reload
+    loadbalance
+}

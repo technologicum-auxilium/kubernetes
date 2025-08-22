@@ -1,7 +1,4 @@
 ---
-# =====================================================================
-# 0) PRÉ-REQUISITOS DE REDE (módulos e sysctl) — exigidos pelo kubeadm
-# =====================================================================
 - name: Ensure kernel modules file for Kubernetes
   ansible.builtin.copy:
     dest: /etc/modules-load.d/k8s.conf
@@ -32,20 +29,22 @@
   register: _sysctl_apply
   changed_when: true
 
-# =====================================================================
-# 1) Limpeza de repositórios antigos (evita conflito Signed-By)
-# =====================================================================
 - name: Kubernetes APT repo sanity (remove legacy/conflicting sources)
   ansible.builtin.import_tasks: "{{ role_path }}/tasks/repo_sanity.yml"
 
-# =====================================================================
-# 2) Repo oficial pkgs.k8s.io (com keyring dedicado)
-# =====================================================================
 - name: Ensure keyrings dir
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
     mode: "0755"
+
+- name: Ensure GPG present for dearmor
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - ca-certificates
+    state: present
+    update_cache: yes
 
 - name: Download Kubernetes apt key (pkgs.k8s.io)
   ansible.builtin.get_url:
@@ -68,18 +67,10 @@
   ansible.builtin.apt:
     update_cache: yes
 
-# =====================================================================
-# 3) Instala kubelet/kubeadm/kubectl com pin automático (e permite downgrade)
-#    kube_version aceita:
-#      - "1.29"    -> última 1.29.x-*-*
-#      - "1.29.6"  -> 1.29.6-*-*
-#      - ""        -> mais recente do canal configurado
-# =====================================================================
 - name: Normalize kube_version to string
   ansible.builtin.set_fact:
     kube_version_str: "{{ (kube_version | default('') ) | string }}"
 
-# Tenta madison primeiro; se vier vazio, cai para 'apt-cache show -a'
 - name: Query available kubelet versions (robusto)
   ansible.builtin.shell: |
     set -o pipefail
@@ -93,7 +84,6 @@
   register: _kubelet_versions
   changed_when: false
 
-# Para debug (opcional)
 - name: Show discovered kubelet versions
   ansible.builtin.debug:
     var: _kubelet_versions.stdout_lines
@@ -112,7 +102,6 @@
       ^{{ kube_version_str | regex_escape() }}
       {%- endif -%}
 
-# Se tiver prefixo, filtra; senão pega a primeira (mais recente após sort -Vr)
 - name: Pick best matching kubelet version
   ansible.builtin.set_fact:
     __pin_version: >-
@@ -125,7 +114,6 @@
         else (_kubelet_versions.stdout_lines | first | default(''))
       }}
 
-# Fallback adicional: usa Candidate do apt-cache policy se ainda não houver pin
 - name: Fallback to apt-cache policy Candidate if pin is still empty
   ansible.builtin.shell: |
     apt-cache policy kubelet | awk '/Candidate:/ {print $2}'
@@ -148,13 +136,17 @@
       e a saída de 'apt-cache madison kubelet'.
   when: (__pin_version | default('')) | length == 0
 
-# Remove hold caso exista, para permitir (down)grade
-- name: Unhold kube* packages if previously held
-  ansible.builtin.dpkg_selections:
-    name: "{{ item }}"
-    selection: install
+- name: Gather installed packages
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Unhold kube* packages if installed
+  ansible.builtin.command: "apt-mark unhold {{ item }}"
   loop: [kubelet, kubeadm, kubectl]
-  ignore_errors: true
+  when: item in ansible_facts.packages
+  register: _unholds
+  changed_when: "'was already not held' not in (_unholds.stdout | default(''))"
+  failed_when: false
 
 - name: Install kubelet/kubeadm/kubectl (pinned, allow downgrade)
   ansible.builtin.apt:
@@ -166,15 +158,15 @@
     update_cache: yes
     allow_downgrade: yes
 
-- name: Hold kube* packages (lock)
-  ansible.builtin.dpkg_selections:
-    name: "{{ item }}"
-    selection: hold
-  loop: [kubelet, kubeadm, kubectl]
+- name: Refresh installed packages facts
+  ansible.builtin.package_facts:
+    manager: auto
 
-# =====================================================================
-# 4) Kubelet anunciando o IP da BRIDGE 192.168.100.* (auto-detecção)
-# =====================================================================
+- name: Hold kube* packages
+  ansible.builtin.command: "apt-mark hold {{ item }}"
+  loop: [kubelet, kubeadm, kubectl]
+  when: item in ansible_facts.packages
+  
 - name: Detect bridged IP in 192.168.100.0/24
   ansible.builtin.set_fact:
     bridged_ip: >-

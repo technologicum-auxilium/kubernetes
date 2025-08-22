@@ -1,5 +1,22 @@
 ---
 # roles/metallb/tasks/main.yml
+#
+# Requisitos externos (no seu projeto):
+# - templates/metallb-values.yaml.j2
+# - templates/ipaddresspool.yaml.j2
+# - templates/l2advertisement.yaml.j2
+#
+# Variáveis esperadas (padrões em defaults/vars):
+# - metallb_kubeconfig: /etc/kubernetes/admin.conf
+# - metallb_namespace: metallb-system
+# - metallb_release_name: metallb
+# - metallb_helm_repo_name: metallb
+# - metallb_helm_repo_url: https://metallb.github.io/metallb
+# - metallb_chart_version: "" (vazio = latest)
+# - metallb_master_group: "master" (ou "controlplane")
+# - metallb_control_host: "" (host específico opcional)
+# - metallb_address_pools: lista de dicts {name, addresses: [...]}
+# - metallb_l2advertisements: lista de dicts {name, ipAddressPools: [...]}
 
 # === 0) Resolver o host de controle (UMA VEZ) ================================
 # Preferência:
@@ -30,11 +47,27 @@
     cacheable: true
   run_once: true
 
-# Helper para acessar o cp_host resolvido de forma estável de qualquer task:
-# use SEMPRE: delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+# Helper: para delegar sempre ao mesmo host de controle:
+#   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
 
-# === 1) Garantir Helm no host de controle ====================================
-- import_tasks: prereqs_helm.yml
+# === 1) Garantir Helm/dep no host de controle =================================
+# Se você tiver um tasks/prereqs_helm.yml, importe-o; senão, garanta helm aqui.
+- name: Ensure Helm binary is present (quick check)
+  ansible.builtin.command: helm version --short
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# jq é usado no patch do ValidatingWebhookConfiguration
+- name: Ensure jq present on control host
+  ansible.builtin.apt:
+    name: jq
+    state: present
+    update_cache: yes
+  become: true
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
 
 # === 2) Helm repo + namespace + values =======================================
 - name: Add MetalLB Helm repo
@@ -90,7 +123,31 @@
   run_once: true
   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
 
-# === 4) IPAddressPool (render + validar + aplicar via kubectl) ===============
+# === 3.1) Esperar controller disponível ======================================
+- name: Wait for metallb-controller Available
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ metallb_kubeconfig }}
+    -n {{ metallb_namespace }}
+    wait deploy/metallb-controller --for=condition=Available=True --timeout=180s
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 3.2) Esperar endpoints do webhook (até 2min; não falhar) ================
+- name: Wait for webhook service endpoints
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ metallb_kubeconfig }} -n {{ metallb_namespace }} \
+      get endpoints metallb-webhook-service -o jsonpath='{.subsets[*].addresses[*].ip}'
+  register: _webhook_eps
+  retries: 24
+  delay: 5
+  until: _webhook_eps.stdout | trim | length > 0
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 4) IPAddressPool (render + validar) =====================================
 - name: Render IPAddressPool manifests (robusto)
   ansible.builtin.copy:
     dest: "/tmp/metallb-ipool-{{ item.name }}.yaml"
@@ -125,21 +182,60 @@
   run_once: true
   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
 
-- name: Apply IPAddressPool manifests
+# === 4.x) Aplicar IPAddressPool (com fallback de webhook) =====================
+- name: Apply IPAddressPool manifests (normal attempt)
   ansible.builtin.command: >
     kubectl --kubeconfig={{ metallb_kubeconfig }}
     apply -f /tmp/metallb-ipool-{{ item.name }}.yaml
   loop: "{{ metallb_address_pools }}"
   loop_control:
     label: "{{ item.name }}"
-  register: apply_ipool
+  register: _apply_ipool_normal
   changed_when: >
-    ('created' in (apply_ipool.stdout | default(''))) or
-    ('configured' in (apply_ipool.stdout | default('')))
+    ('created' in (_apply_ipool_normal.stdout | default(''))) or
+    ('configured' in (_apply_ipool_normal.stdout | default('')))
+  failed_when: false
   run_once: true
   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
 
-# === 5) L2Advertisement (render + validar + aplicar via kubectl) =============
+- name: Flag webhook refused for IPPool
+  ansible.builtin.set_fact:
+    _need_webhook_patch_ipool: >-
+      {{
+        (_apply_ipool_normal.stderr | default('')) is search('connect: connection refused')
+      }}
+  run_once: true
+
+- name: Patch VWC to failurePolicy=Ignore (TEMP) for IPPool
+  ansible.builtin.shell: |
+    set -e
+    VWC=$(kubectl --kubeconfig={{ metallb_kubeconfig }} get validatingwebhookconfigurations -o name | grep metallb || true)
+    if [ -n "$VWC" ]; then
+      kubectl --kubeconfig={{ metallb_kubeconfig }} get $VWC -o json \
+      | jq '.webhooks |= map(.failurePolicy="Ignore")' \
+      | kubectl --kubeconfig={{ metallb_kubeconfig }} apply -f -
+    fi
+  when: _need_webhook_patch_ipool | default(false)
+  changed_when: true
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Re-apply IPAddressPool under Ignore
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ metallb_kubeconfig }}
+    apply -f /tmp/metallb-ipool-{{ item.name }}.yaml
+  loop: "{{ metallb_address_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _need_webhook_patch_ipool | default(false)
+  register: _apply_ipool_ignore
+  changed_when: >
+    ('created' in (_apply_ipool_ignore.stdout | default(''))) or
+    ('configured' in (_apply_ipool_ignore.stdout | default('')))
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 5) L2Advertisement (render + validar) ===================================
 - name: Render L2Advertisement manifests (robusto)
   ansible.builtin.copy:
     dest: "/tmp/metallb-l2adv-{{ item.name }}.yaml"
@@ -174,16 +270,56 @@
   run_once: true
   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
 
-- name: Apply L2Advertisement manifests
+# === 5.x) Aplicar L2Advertisement (com mesmo fallback) =======================
+- name: Apply L2Advertisement manifests (normal attempt)
   ansible.builtin.command: >
     kubectl --kubeconfig={{ metallb_kubeconfig }}
     apply -f /tmp/metallb-l2adv-{{ item.name }}.yaml
   loop: "{{ metallb_l2advertisements }}"
   loop_control:
     label: "{{ item.name }}"
-  register: apply_l2
+  register: _apply_l2_normal
   changed_when: >
-    ('created' in (apply_l2.stdout | default(''))) or
-    ('configured' in (apply_l2.stdout | default('')))
+    ('created' in (_apply_l2_normal.stdout | default(''))) or
+    ('configured' in (_apply_l2_normal.stdout | default('')))
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+- name: Flag webhook refused for L2Adv
+  ansible.builtin.set_fact:
+    _need_webhook_patch_l2: >-
+      {{
+        (_apply_l2_normal.stderr | default('')) is search('connect: connection refused')
+      }}
+  run_once: true
+
+- name: Re-apply L2Advertisement under Ignore (if needed)
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ metallb_kubeconfig }}
+    apply -f /tmp/metallb-l2adv-{{ item.name }}.yaml
+  loop: "{{ metallb_l2advertisements }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _need_webhook_patch_ipool | default(false) or _need_webhook_patch_l2 | default(false)
+  register: _apply_l2_ignore
+  changed_when: >
+    ('created' in (_apply_l2_ignore.stdout | default(''))) or
+    ('configured' in (_apply_l2_ignore.stdout | default('')))
+  run_once: true
+  delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
+
+# === 6) Reverter o VWC para Fail (se aplicamos Ignore) =======================
+- name: Revert VWC failurePolicy back to Fail
+  ansible.builtin.shell: |
+    set -e
+    VWC=$(kubectl --kubeconfig={{ metallb_kubeconfig }} get validatingwebhookconfigurations -o name | grep metallb || true)
+    if [ -n "$VWC" ]; then
+      kubectl --kubeconfig={{ metallb_kubeconfig }} get $VWC -o json \
+      | jq '.webhooks |= map(.failurePolicy="Fail")' \
+      | kubectl --kubeconfig={{ metallb_kubeconfig }} apply -f -
+    fi
+  when: _need_webhook_patch_ipool | default(false) or _need_webhook_patch_l2 | default(false)
+  changed_when: true
   run_once: true
   delegate_to: "{{ hostvars[ansible_play_hosts_all[0]].metallb_cp_host }}"
